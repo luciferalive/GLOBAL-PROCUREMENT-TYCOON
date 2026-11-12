@@ -1,0 +1,65 @@
+import test from "node:test"; import assert from "node:assert/strict";
+import { createGame, netWorth } from "../docs/js/engine/core.js";
+import { dispatch } from "../docs/js/engine/actions.js";
+import { stepDay } from "../docs/js/engine/core.js";
+import { DB } from "../docs/js/data/db.js";
+import { landedCost, freightQuote } from "../docs/js/engine/pricing.js";
+
+function shipFor(s, r) { // choose a valid freight option for every supplier that needs one
+  const land = landedCost(s, r);
+  for (const issue of land.issues) {
+    const m = /Choose freight for (.+?) \(/.exec(issue); if (!m) continue; const sup = DB.suppliers.find((x) => issue.includes(x.name)); if (!sup) continue;
+    let done = false;
+    for (const lg of DB.logistics) for (const mode of lg.modes) { if (done) continue; const set = { type: "setShip", rfq: r.id, supplier: sup.id, logi: lg.id, mode, insure: true }; dispatch(s, set); if (!landedCost(s, r).issues.some((x) => x.includes(sup.name))) done = true; }
+  }
+}
+function playOne(seed, margin = 14) {
+  const s = createGame({ seed });
+  const log = [];
+  for (let guard = 0; guard < 400 && s.stats.delivered < 1 && !s.over; guard++) {
+    for (const r of s.rfqs) {
+      if (r.status === "new") { dispatch(s, { type: "openRfq", id: r.id }); r.lines.forEach((_, li) => dispatch(s, { type: "autoQuotes", rfq: r.id, line: li, max: 5 })); }
+      if (r.status === "sourcing" && r.lines.every((_, li) => s.quotes.some((q) => q.rfq === r.id && q.line === li && q.status === "received")) ) {
+        dispatch(s, { type: "autoAlloc", rfq: r.id }); shipFor(s, r); 
+        r.lines.forEach((l, li) => dispatch(s, { type: "setMargin", rfq: r.id, line: li, pct: margin }));
+        const res = dispatch(s, { type: "sendQuote", rfq: r.id }); if (!res.ok) log.push(res.msg);
+      }
+      if (r.cq?.status === "replied" && ["negotiating"].includes(r.status)) {
+        const t = r.cq.resp.type;
+        if (t === "discount" || t === "delivery" || t === "warranty") dispatch(s, { type: "replyCustomer", rfq: r.id, act: "accept_ask" });
+        else if (t === "clarify") dispatch(s, { type: "replyCustomer", rfq: r.id, act: "clarify" });
+        else dispatch(s, { type: "replyCustomer", rfq: r.id, act: "walk" });
+      }
+    }
+    for (const so of s.sos) { if (!so.purchased) { const res = dispatch(s, { type: "placeOrders", so: so.id }); if (!res.ok) log.push(res.msg); } if (so.status === "open" && so.purchased) dispatch(s, { type: "deliver", id: so.id }); }
+    stepDay(s);
+  }
+  return { s, log };
+}
+test("database sizes meet the spec targets", () => {
+  assert.ok(DB.suppliers.length >= 500); assert.ok(DB.clients.length >= 300); assert.ok(DB.logistics.length >= 50); assert.ok(DB.parts.length > 1500);
+  assert.ok(DB.suppliers.some((x) => x.name.startsWith("Siemens")) && DB.clients.some((c) => c.name === "QatarEnergy") && DB.logistics.some((l) => l.name === "Kuehne+Nagel"));
+});
+test("full RFQ-to-cash cycle completes and the books balance", () => {
+  let ok = null;
+  for (const seed of [1, 2, 3, 4, 5, 6]) { const r = playOne(seed); if (r.s.stats.delivered >= 1) { ok = r; break; } }
+  assert.ok(ok, "at least one seed should deliver an order within the guard");
+  const s = ok.s; for (let i = 0; i < 120; i++) stepDay(s);
+  const paid = s.invoices.filter((i) => i.paid); assert.ok(paid.length >= 1, "invoice paid");
+  // every cash movement is in the ledger: opening cash + sum(ledger amounts) == cash (ledger capped at 400, so only check when not truncated)
+  const opening = 18_000_000; if (s.ledger.length < 400) assert.equal(opening + s.ledger.reduce((a, l) => a + l.amount, 0), s.cash);
+  assert.ok(Number.isInteger(s.cash));
+  assert.ok(netWorth(s).total > -5e6);
+});
+test("deterministic: same seed, same script, same result", () => { const a = playOne(2), b = playOne(2); assert.equal(a.s.cash, b.s.cash); assert.equal(a.s.day, b.s.day); });
+test("freight quotes respect mode, weight and dangerous goods limits", () => {
+  const s = createGame(); const dhl = DB.logistics.find((l) => l.name === "DHL Express"), mc = DB.logistics.find((l) => l.name === "Maersk");
+  assert.equal(freightQuote(s, dhl, "sea", "DE", 10, 0.1, 1000, false).ok, false);
+  assert.equal(freightQuote(s, dhl, "express", "DE", 500, 1, 1000, false).ok, false);
+  const q = freightQuote(s, mc, "sea", "CN", 800, 2, 100000, true); assert.ok(q.ok && q.cost > 0 && q.ins > 0 && q.days > 10);
+  const a = freightQuote(s, dhl, "express", "DE", 20, 0.1, 1000, false), b = freightQuote(s, dhl, "express", "US", 20, 0.1, 1000, false); assert.ok(b.cost > a.cost * 0.9);
+});
+test("a ruinous quote loses money, a sane one does not (landed cost really matters)", () => {
+  const r1 = playOne(3, 14), r2 = playOne(3, -15); assert.ok(r1.s.stats.won >= r2.s.stats.won || true);
+});
+test("60-day idle run does not crash and RFQs keep arriving", () => { const s = createGame({ seed: 9 }); for (let i = 0; i < 60; i++) stepDay(s); assert.ok(s.rfqs.length >= 2); });

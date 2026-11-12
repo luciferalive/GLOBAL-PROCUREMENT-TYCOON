@@ -1,0 +1,35 @@
+export interface Country { code: string; name: string; cur: string; fx: number; lat: number; lon: number; duty: number; hub: string; freightIdx: number; restrict: string; region: string }
+/** fx = units of local currency per 1 USD (starting rate; drifts daily). duty = simulated import duty % into Qatar for general goods from this origin. */
+export const COUNTRIES: Country[] = [
+  { code: "QA", name: "Qatar", cur: "QAR", fx: 3.64, lat: 25.3, lon: 51.5, duty: 0, hub: "Doha (Hamad Intl / Hamad Port)", freightIdx: 1.0, restrict: "Home market. Local transport only.", region: "Gulf" },
+  { code: "DE", name: "Germany", cur: "EUR", fx: 0.92, lat: 50.1, lon: 8.7, duty: 5, hub: "Frankfurt / Hamburg", freightIdx: 1.05, restrict: "Dual-use electronics may need export licence.", region: "Europe" },
+  { code: "GB", name: "United Kingdom", cur: "GBP", fx: 0.79, lat: 51.5, lon: -0.1, duty: 5, hub: "London Heathrow / Felixstowe", freightIdx: 1.08, restrict: "Post-Brexit paperwork adds documentation time.", region: "Europe" },
+  { code: "US", name: "United States", cur: "USD", fx: 1.0, lat: 40.7, lon: -74.0, duty: 5, hub: "New York / Houston", freightIdx: 1.25, restrict: "Export controls on some technology and defence goods.", region: "Americas" },
+  { code: "CN", name: "China", cur: "CNY", fx: 7.2, lat: 31.2, lon: 121.5, duty: 5, hub: "Shanghai / Shenzhen", freightIdx: 0.85, restrict: "Long sea transit; quality varies by supplier.", region: "Asia" },
+  { code: "IN", name: "India", cur: "INR", fx: 83.0, lat: 19.1, lon: 72.9, duty: 5, hub: "Mumbai / Nhava Sheva", freightIdx: 0.7, restrict: "Customs paperwork heavy; monsoon delays at ports.", region: "Asia" },
+  { code: "JP", name: "Japan", cur: "JPY", fx: 150.0, lat: 35.7, lon: 139.7, duty: 5, hub: "Tokyo / Yokohama", freightIdx: 1.15, restrict: "Precise documentation expected.", region: "Asia" },
+  { code: "KR", name: "South Korea", cur: "KRW", fx: 1340.0, lat: 37.5, lon: 127.0, duty: 5, hub: "Seoul Incheon / Busan", freightIdx: 1.1, restrict: "None notable.", region: "Asia" },
+  { code: "IT", name: "Italy", cur: "EUR", fx: 0.92, lat: 45.5, lon: 9.2, duty: 5, hub: "Milan / Genoa", freightIdx: 1.0, restrict: "Strikes can delay road freight.", region: "Europe" },
+  { code: "FR", name: "France", cur: "EUR", fx: 0.92, lat: 48.9, lon: 2.4, duty: 5, hub: "Paris CDG / Le Havre", freightIdx: 1.05, restrict: "None notable.", region: "Europe" },
+  { code: "NL", name: "Netherlands", cur: "EUR", fx: 0.92, lat: 52.4, lon: 4.9, duty: 5, hub: "Amsterdam / Rotterdam", freightIdx: 1.0, restrict: "Efficient hub; low delay risk.", region: "Europe" },
+  { code: "ES", name: "Spain", cur: "EUR", fx: 0.92, lat: 40.4, lon: -3.7, duty: 5, hub: "Madrid / Valencia", freightIdx: 1.0, restrict: "None notable.", region: "Europe" },
+  { code: "TR", name: "Turkey", cur: "TRY", fx: 32.0, lat: 41.0, lon: 29.0, duty: 5, hub: "Istanbul / Mersin", freightIdx: 0.8, restrict: "Currency volatility affects quotes.", region: "Europe" },
+  { code: "AE", name: "United Arab Emirates", cur: "AED", fx: 3.67, lat: 25.2, lon: 55.3, duty: 0, hub: "Dubai Jebel Ali / DXB", freightIdx: 0.6, restrict: "GCC: no duty between GCC states. Re-export hub.", region: "Gulf" },
+  { code: "SA", name: "Saudi Arabia", cur: "SAR", fx: 3.75, lat: 24.7, lon: 46.7, duty: 0, hub: "Dammam / Riyadh", freightIdx: 0.7, restrict: "GCC: no duty. Road border queues possible.", region: "Gulf" },
+  { code: "SG", name: "Singapore", cur: "SGD", fx: 1.34, lat: 1.35, lon: 103.8, duty: 5, hub: "Singapore Changi / PSA", freightIdx: 0.95, restrict: "Very efficient customs.", region: "Asia" },
+  { code: "MY", name: "Malaysia", cur: "MYR", fx: 4.7, lat: 3.1, lon: 101.7, duty: 5, hub: "Port Klang / KLIA", freightIdx: 0.9, restrict: "None notable.", region: "Asia" },
+  { code: "TH", name: "Thailand", cur: "THB", fx: 36.0, lat: 13.7, lon: 100.5, duty: 5, hub: "Bangkok / Laem Chabang", freightIdx: 0.9, restrict: "None notable.", region: "Asia" },
+  { code: "AU", name: "Australia", cur: "AUD", fx: 1.52, lat: -33.9, lon: 151.2, duty: 5, hub: "Sydney / Melbourne", freightIdx: 1.3, restrict: "Strict biosecurity on wooden packing.", region: "Oceania" },
+  { code: "KW", name: "Kuwait", cur: "KWD", fx: 0.31, lat: 29.4, lon: 48.0, duty: 0, hub: "Kuwait City", freightIdx: 0.7, restrict: "GCC: no duty.", region: "Gulf" },
+  { code: "OM", name: "Oman", cur: "OMR", fx: 0.385, lat: 23.6, lon: 58.4, duty: 0, hub: "Muscat / Sohar", freightIdx: 0.7, restrict: "GCC: no duty.", region: "Gulf" },
+  { code: "CH", name: "Switzerland", cur: "CHF", fx: 0.88, lat: 47.4, lon: 8.5, duty: 5, hub: "Zurich", freightIdx: 1.1, restrict: "Non-EU: extra customs step.", region: "Europe" },
+  { code: "SE", name: "Sweden", cur: "SEK", fx: 10.5, lat: 59.3, lon: 18.1, duty: 5, hub: "Gothenburg / Stockholm", freightIdx: 1.1, restrict: "None notable.", region: "Europe" },
+  { code: "NO", name: "Norway", cur: "NOK", fx: 10.7, lat: 59.9, lon: 10.7, duty: 5, hub: "Oslo / Stavanger", freightIdx: 1.15, restrict: "Oil and gas centre.", region: "Europe" },
+  { code: "DK", name: "Denmark", cur: "DKK", fx: 6.85, lat: 55.7, lon: 12.6, duty: 5, hub: "Copenhagen", freightIdx: 1.05, restrict: "None notable.", region: "Europe" },
+  { code: "FI", name: "Finland", cur: "EUR", fx: 0.92, lat: 60.2, lon: 24.9, duty: 5, hub: "Helsinki", freightIdx: 1.1, restrict: "None notable.", region: "Europe" },
+  { code: "EG", name: "Egypt", cur: "EGP", fx: 48.0, lat: 30.0, lon: 31.2, duty: 5, hub: "Cairo / Alexandria", freightIdx: 0.75, restrict: "Documentation delays common.", region: "Africa" },
+  { code: "BR", name: "Brazil", cur: "BRL", fx: 5.0, lat: -23.5, lon: -46.6, duty: 5, hub: "Sao Paulo / Santos", freightIdx: 1.35, restrict: "Long routes, high cost.", region: "Americas" },
+  { code: "CA", name: "Canada", cur: "CAD", fx: 1.36, lat: 43.7, lon: -79.4, duty: 5, hub: "Toronto / Montreal", freightIdx: 1.25, restrict: "None notable.", region: "Americas" },
+];
+export const COUNTRY = Object.fromEntries(COUNTRIES.map((c) => [c.code, c])) as Record<string, Country>;
+export const km = (a: Country, b: Country) => { const R = 6371, rad = Math.PI / 180, dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad, h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2; return Math.round(2 * R * Math.asin(Math.sqrt(h))); };
