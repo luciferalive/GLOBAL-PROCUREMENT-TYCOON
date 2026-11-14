@@ -1,0 +1,1 @@
+export const ui: { page: string; rfq: number | null; so: number | null; modal: null | { kind: string; [k: string]: any }; tab: Record<string, string>; q: Record<string, string>; guide: boolean } = { page: "dashboard", rfq: null, so: null, modal: null, tab: {}, q: {}, guide: true };

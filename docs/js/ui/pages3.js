@@ -1,0 +1,96 @@
+import { COUNTRIES, COUNTRY } from "../data/countries.js";
+import { CATS, DISCLAIMER, IND, INDUSTRIES, OEMS } from "../data/lists.js";
+import { DB, MODE_LABEL, PERSONA_LABEL } from "../data/db.js";
+import { CERT_COST, dateStr, money, registrationCheck } from "../engine/core.js";
+import { MONTHLY, ROLE_EFFECT, ROLE_LABEL, freightQuote, toC } from "../engine/pricing.js";
+import { MISSIONS, TRAINING } from "../engine/missions.js";
+import { docHtml, listDocs } from "./docs.js";
+import { bar, btn, esc, flag, kpi, pill, table } from "./dom.js";
+import { ui } from "./state.js";
+const search = (key, ph) => `<input type="search" class="srch" placeholder="${esc(ph)}" value="${esc(ui.q[key] ?? "")}" data-ui="${key}">`;
+const sel = (key, opts, all = "All") => `<select data-ui="${key}"><option value="">${all}</option>${opts.map(([v, l]) => `<option value="${esc(v)}" ${ui.q[key] === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
+const cOpts = () => COUNTRIES.map((c) => [c.code, c.name]);
+export const suppliers = { id: "suppliers", title: "Supplier Database", icon: "⚒", group: "Network", render(s) {
+        const q = (ui.q.sup ?? "").toLowerCase(), cc = ui.q.supc, tp = ui.q.supt, ind = ui.q.supi, br = (ui.q.supb ?? "").toLowerCase();
+        const list = DB.suppliers.filter((x) => (!q || x.name.toLowerCase().includes(q)) && (!cc || x.country === cc) && (!tp || x.type === tp) && (!ind || x.inds.includes(ind)) && (!br || x.brands.some((b) => OEMS.find((o) => o.id === b)?.name.toLowerCase().includes(br))) && x.inds.some((i) => s.industries.includes(i)));
+        const sid = ui.q.supsel;
+        const det = sid ? DB.supplierById[sid] : undefined;
+        return `<div class="ph"><h1>Supplier Database</h1><p class="sub">${DB.suppliers.length} simulated suppliers: manufacturers (OEM), distributors, independent traders and local stockists. Unlocking industries makes more of them searchable.</p></div>
+<div class="filters">${search("sup", "Search name…")}${search("supb", "Brand / manufacturer…")}${sel("supc", cOpts(), "Any country")}${sel("supt", [["oem", "Manufacturer (OEM)"], ["distributor", "Distributor"], ["trader", "Independent trader"], ["local", "Local stockist"]], "Any type")}${sel("supi", INDUSTRIES.filter((i) => s.industries.includes(i.id)).map((i) => [i.id, i.name]), "Any industry")}<span class="sm">${list.length} found</span></div>
+${det ? `<div class="panel hot"><h2>${flag(det.country)} ${esc(det.name)}</h2><p>${esc(det.blurb)}</p><div class="kgrid k4">${kpi("Type", det.type + (det.auth ? " · authorized" : ""), "", "")}${kpi("Price level", Math.round(det.priceF * 100) + "% of list", "", "")}${kpi("Typical lead", det.leadD + " days", "", "")}${kpi("Payment", det.terms, "", "")}${kpi("Reliability", Math.round(det.reliab * 100) + "%", "", det.reliab > 0.9 ? "good" : "warn")}${kpi("Documents", det.docs, "", "")}${kpi("Stock chance", Math.round(det.stockP * 100) + "%", "", "")}${kpi("Commercial risk", Math.round(det.risk * 100) + "%", "", det.risk > 0.1 ? "bad" : "")}</div><p class="sm"><b>Brands:</b> ${det.brands.slice(0, 18).map((b) => esc(OEMS.find((o) => o.id === b)?.name ?? "")).join(", ") || "generic / own-brand"} · ${det.real ? "Real company name used only as a reference. All terms are simulated." : "Fictional company."}</p></div>` : ""}
+${table(["Supplier", "Country", "Type", "Price", "Lead", "Terms", "Docs", "Reliability", ""], list.slice(0, 40).map((x) => [`<b>${esc(x.name)}</b>`, `${flag(x.country)} ${esc(COUNTRY[x.country].name)}`, pill(x.type + (x.auth ? " · auth" : ""), x.type === "trader" ? "warn" : x.type === "oem" ? "ok" : "info"), Math.round(x.priceF * 100) + "%", x.leadD + " d", x.terms, x.docs, Math.round(x.reliab * 100) + "%", btn("Profile", { type: "viewSupplier", ui: { q: { supsel: x.id } } }, "xs")]))}
+${list.length > 40 ? `<p class="sm">Showing 40 of ${list.length}. Narrow the filters to see more.</p>` : ""}<p class="sm disc">${esc(DISCLAIMER)}</p>`;
+    } };
+const STAGES = ["Company identified", "Introduction sent", "Registration link", "Documents submitted", "Compliance review", "Approved"];
+export const customers = { id: "customers", title: "Customers & Vendor Registration", icon: "☰", group: "Network", render(s) {
+        const q = (ui.q.cus ?? "").toLowerCase(), cc = ui.q.cusc, ind = ui.q.cusi, st = ui.q.cuss ?? "";
+        const stage = (id) => { const g = s.reg[id]; return g?.result === "approved" ? 5 : g?.result === "rejected" ? -1 : g ? g.stage : 0; };
+        const list = DB.clients.filter((c) => (!q || c.name.toLowerCase().includes(q)) && (!cc || c.country === cc) && (!ind || c.industry === ind) && (st === "" || (st === "approved" ? stage(c.id) === 5 : st === "progress" ? stage(c.id) > 0 && stage(c.id) < 5 : st === "locked" ? !s.industries.includes(c.industry) : stage(c.id) === 0 && s.industries.includes(c.industry))));
+        const approved = DB.clients.filter((c) => stage(c.id) === 5);
+        return `<div class="ph"><h1>Customers & Vendor Registration</h1><p class="sub">${DB.clients.length} simulated companies. Big names demand approved-vendor status before they send RFQs: contact them, submit documents and survive the compliance review.</p></div>
+<div class="kgrid k4">${kpi("Approved customers", String(approved.length), "send you RFQs", "good")}${kpi("Applications in progress", String(DB.clients.filter((c) => stage(c.id) > 0 && stage(c.id) < 5).length), "", "")}${kpi("Your reputation", Math.round(s.rep) + "", "", "")}${kpi("Certifications", String(s.certs.length), s.certs.join(", ") || "none yet", "")}</div>
+<div class="filters">${search("cus", "Search company…")}${sel("cusc", cOpts(), "Any country")}${sel("cusi", INDUSTRIES.map((i) => [i.id, i.name]), "Any industry")}${sel("cuss", [["approved", "Approved"], ["progress", "In progress"], ["new", "Not started"], ["locked", "Industry locked"]], "Any status")}<span class="sm">${list.length} found</span></div>
+${table(["Company", "Industry", "Style", "Annual volume", "Pays on time", "Qualification", "Registration", ""], list.slice(0, 30).map((c) => {
+            const g = s.reg[c.id], stg = stage(c.id), locked = !s.industries.includes(c.industry);
+            const chk = registrationCheck(s, c.id);
+            const steps = `<div class="steps">${STAGES.map((l, i) => `<i class="${i <= stg && stg >= 0 ? "on" : ""}" title="${l}"></i>`).join("")}</div>`;
+            let actn = "";
+            if (stg === 0 && !locked)
+                actn = btn("Contact buyer", { type: "contactClient", id: c.id }, "pri xs");
+            else if (stg === 2)
+                actn = btn("Submit documents ($300)", { type: "submitDocs", id: c.id }, "pri xs");
+            else if (locked)
+                actn = pill("unlock " + IND[c.industry].name, "bad");
+            return [`<b>${esc(c.name)}</b><br><span class="sm">${flag(c.country)} ${esc(COUNTRY[c.country]?.name ?? c.country)}${c.real ? " · real name, simulated account" : ""}</span>`, `${IND[c.industry].icon} ${esc(IND[c.industry].name)}`, PERSONA_LABEL[c.persona], money(toC(c.contract * 8)) + "/yr", Math.round(c.payRel * 100) + "%", "★".repeat(c.qual) + "☆".repeat(5 - c.qual) + (c.qual > 0 && stg < 5 && !locked ? (chk.ok ? "<br><span class='good sm'>you qualify</span>" : `<br><span class="warn sm">${esc(chk.reasons[0])}</span>`) : ""), `${steps}<span class="sm">${stg === 5 ? "Approved" : stg === -1 ? `<span class="bad">Rejected: ${esc(g?.reason ?? "")} (retry day ${g?.retryDay})</span>` : STAGES[Math.max(0, stg)]}</span>`, actn];
+        }))}
+${list.length > 30 ? `<p class="sm">Showing 30 of ${list.length}. Use the filters.</p>` : ""}<p class="sm disc">${esc(DISCLAIMER)}</p>`;
+    } };
+export const logisticsPage = { id: "logistics", title: "Logistics Providers", icon: "✈", group: "Network", render(s) {
+        const q = (ui.q.lg ?? "").toLowerCase(), md = ui.q.lgm;
+        const list = DB.logistics.filter((l) => (!q || l.name.toLowerCase().includes(q)) && (!md || l.modes.includes(md)));
+        const org = ui.q.lgo ?? "DE", kg = +(ui.q.lgk ?? 200), vol = +(ui.q.lgv ?? 1);
+        const calc = [];
+        for (const l of DB.logistics)
+            for (const m of l.modes) {
+                const f = freightQuote(s, l, m, org, kg, vol, toC(5000), false);
+                if (f.ok)
+                    calc.push([`<b>${esc(l.name)}</b>`, MODE_LABEL[m], money(f.cost), `${f.days} days`, Math.round(l.reliab * 100) + "%"]);
+            }
+        calc.sort((a, b) => parseFloat(a[2].replace(/[^0-9.]/g, "")) - parseFloat(b[2].replace(/[^0-9.]/g, "")));
+        return `<div class="ph"><h1>Logistics Providers</h1><p class="sub">${DB.logistics.length} simulated carriers and forwarders. Rates are generated by the game and are not real DHL, FedEx or other quotations.</p></div>
+<div class="panel"><h2>Freight rate calculator</h2><div class="filters">${sel("lgo", cOpts().filter(([c]) => c !== "QA"), "Origin")}<label class="sm">kg <input type="number" class="qty" data-ui="lgk" value="${kg}" min="1"></label><label class="sm">m³ <input type="number" class="qty" step="0.1" data-ui="lgv" value="${vol}" min="0.01"></label><span class="sm">Origin → Doha · ${esc(COUNTRY[org].name)} · ${esc(COUNTRY[org].restrict)}</span></div>${table(["Provider", "Mode", "Cost", "Transit", "Reliability"], calc.slice(0, 14))}</div>
+<div class="filters">${search("lg", "Search provider…")}${sel("lgm", Object.entries(MODE_LABEL), "Any mode")}</div>
+${table(["Provider", "HQ", "Modes", "Fuel surcharge", "Doc fee", "Max kg", "DG", "Heavy", "Customs service", "Reliability"], list.slice(0, 30).map((l) => [`<b>${esc(l.name)}</b>`, flag(l.country) + " " + l.country, l.modes.map((m) => MODE_LABEL[m]).join(", "), Math.round(l.fuel * 100) + "%", money(toC(l.docFee)), l.maxKg.toLocaleString(), l.dg ? "✓" : "–", l.heavy ? "✓" : "–", l.customs ? "✓" : "–", Math.round(l.reliab * 100) + "%"]))}`;
+    } };
+export const industries = { id: "industries", title: "Industries & Certifications", icon: "◈", group: "Company", render(s) {
+        return `<div class="ph"><h1>Industries & Certifications</h1><p class="sub">Each new industry brings new clients, suppliers, OEMs, products, RFQs and technical requirements, and the paperwork to match.</p></div>
+<div class="panel"><h2>Certifications</h2><div class="cards">${Object.entries(CERT_COST).map(([n, c]) => { const has = s.certs.includes(n), pend = s.certPending[n]; return `<div class="card ${has ? "ok" : ""}"><b>${esc(n)}</b><p class="sm">Needed for some industries and demanding clients.</p>${has ? pill("held", "ok") : pend ? pill("audit ready day " + pend, "warn") : btn(`Get certified · ${money(toC(c.cost))} · ${c.days} d`, { type: "buyCert", name: n }, "pri sm")}</div>`; }).join("")}</div></div>
+<div class="panel"><h2>Industry tree</h2><div class="cards">${INDUSTRIES.map((i) => { const on = s.industries.includes(i.id); const nCl = DB.clients.filter((c) => c.industry === i.id).length; const nSup = DB.suppliers.filter((x) => x.type === "oem" && x.inds.includes(i.id)).length; return `<div class="card ${on ? "ok" : ""}"><div class="big-i">${i.icon}</div><b>${esc(i.name)}</b><p class="sm">${nCl} clients · ${nSup} OEMs · ${CATS.filter((c) => c.inds.includes(i.id)).length} product groups${i.cert ? " · " + esc(i.cert) : ""}</p>${on ? pill("unlocked", "ok") : `<p class="sm">Cost ${money(toC(i.cost))} · reputation ${i.rep}${i.cert ? " · needs " + esc(i.cert) : ""}</p>${btn("Unlock", { type: "unlockIndustry", id: i.id }, "pri sm")}`}</div>`; }).join("")}</div></div>`;
+    } };
+export const company = { id: "company", title: "Company & Team", icon: "☺", group: "Company", render(s) {
+        const sal = Object.entries(s.staff).reduce((a, [k, n]) => a + MONTHLY[k] * n, 0);
+        return `<div class="ph"><h1>${esc(s.name)}</h1><p class="sub">Team, missions and achievements. Monthly salary bill: <b>${money(toC(sal))}</b>.</p></div>
+<div class="panel"><h2>Departments</h2>${table(["Role", "Staff", "Salary / month", "Effect", ""], Object.keys(MONTHLY).map((k) => [`<b>${ROLE_LABEL[k]}</b>`, String(s.staff[k]), money(toC(MONTHLY[k])), ROLE_EFFECT[k], btn("Hire", { type: "hire", role: k }, "pri xs") + btn("Release", { type: "fire", role: k }, "ghost xs")]))}<p class="sm">Hiring costs one month's salary up front. Staff are paid at each month end.</p></div>
+<div class="panel"><h2>Missions (${s.missions.length}/${MISSIONS.length})</h2><div class="cards">${MISSIONS.map((m) => { const d = s.missions.includes(m.id); return `<div class="card ${d ? "ok" : ""}"><b>${d ? "✅ " : ""}${esc(m.title)}</b><p class="sm">${esc(m.text)}</p><span class="sm">Reward ${money(toC(m.reward))} · reputation +${m.rep}</span></div>`; }).join("")}</div></div>`;
+    } };
+export const documents = { id: "documents", title: "Documents", icon: "▣", group: "Company", render(s) {
+        const docs = listDocs(s);
+        const kind = ui.q.dockind ?? "";
+        const view = ui.q.doc;
+        const kinds = [...new Set(docs.map((d) => d.kind))];
+        return `<div class="ph"><h1>Business Documents</h1><p class="sub">Generated from your real game data. Every document is stamped SIMULATED. View, print or save.</p></div>
+${view ? `<div class="panel"><div class="row">${btn("← Back to list", { type: "ui", q: { doc: "" } }, "ghost sm")}${btn("Print", { type: "ui", print: view }, "pri sm")}${btn("Save as HTML", { type: "ui", saveDoc: view }, "sm")}</div><div class="docwrap">${docHtml(s, view)}</div></div>` : `<div class="filters">${sel("dockind", kinds.map((k) => [k, k]), "All types")}<span class="sm">${docs.length} documents</span></div>${table(["Type", "Document", "Day", ""], docs.filter((d) => !kind || d.kind === kind).slice(0, 60).map((d) => [pill(d.kind, "info"), esc(d.title), String(d.day), btn("View", { type: "ui", q: { doc: d.ref } }, "xs")]))}`}`;
+    } };
+export const training = { id: "training", title: "Training & Guide", icon: "?", group: "Help", render(s) {
+        const done = TRAINING.filter((t) => t.check(s)).length;
+        return `<div class="ph"><h1>Training Campaign</h1><p class="sub">14 steps teach the real procurement cycle. Each step ticks off automatically when you do it for real. (${done}/14)</p></div>
+${bar(done, 14)}<div class="steps-list">${TRAINING.map((t, i) => { const d = t.check(s), cur = !d && TRAINING.slice(0, i).every((x) => x.check(s)); return `<div class="tstep ${d ? "done" : cur ? "cur" : ""}"><div class="tn">${d ? "✓" : i + 1}</div><div><b>${esc(t.title)}</b><p>${esc(t.text)}</p><p class="why">💡 ${esc(t.why)}</p>${cur ? btn("Take me there", { type: "ui", page: t.page }, "pri sm") : ""}</div></div>`; }).join("")}</div>
+<div class="panel"><h2>Key ideas in one minute</h2><div class="cards"><div class="card"><b>Landed cost</b><p class="sm">Purchase price + freight + insurance + duty + clearance + local transport + bank charges. Sell above this, always.</p></div><div class="card"><b>Incoterms</b><p class="sm">EXW/FCA/FOB: you arrange freight. CIF/CPT/CIP: supplier pays freight. DAP/DDP: supplier delivers (DDP also pays duty).</p></div><div class="card"><b>Payment terms</b><p class="sm">Advance payment ties up your cash. Net 30/60 gives breathing room. Credit can be negotiated once suppliers trust you.</p></div><div class="card"><b>Cash flow</b><p class="sm">You pay suppliers before your customer pays you. A profitable company can still run out of cash.</p></div><div class="card"><b>Traders vs OEMs</b><p class="sm">Traders are cheap but risky (weak documents, wrong items). OEMs and authorized distributors give documents customers trust.</p></div><div class="card"><b>Reputation</b><p class="sm">On-time deliveries raise it. Late or failed orders lower it. High reputation unlocks big clients and industries.</p></div></div></div>`;
+    } };
+export const newsPage = { id: "news", title: "Business News", icon: "≡", group: "Help", render(s) { return `<div class="ph"><h1>Business News & Events</h1><p class="sub">Price rises, freight surcharges, urgent RFQs, customs holds and late payments change the real numbers in your game.</p></div><div class="panel"><div class="news">${s.news.map((n) => `<div class="nw ${n.kind}"><span class="d">D${n.day}</span>${esc(n.text)}</div>`).join("")}</div></div>`; } };
+export const settings = { id: "settings", title: "Saves & About", icon: "⚙", group: "Help", render(s) {
+        return `<div class="ph"><h1>Saves & About</h1></div>
+<div class="panel"><h2>Game</h2><p>Company: <b>${esc(s.name)}</b> · difficulty ${s.difficulty} · day ${s.day} (${dateStr(s.day)})</p><div class="row">${btn("New game…", { type: "ui", modal: { kind: "newgame" } }, "pri")}${btn("Show / hide training banner", { type: "ui", guide: !ui.guide }, "")}</div></div>
+<div class="panel"><h2>Save slots</h2><p class="sm">Games are stored in your browser (IndexedDB). Autosave every 5 real minutes while playing.</p><div id="slots" data-keep-slots></div><div class="row">${[1, 2, 3, 4, 5].map((i) => btn(`Save slot ${i}`, { type: "ui", save: String(i) }, "sm") + btn(`Load ${i}`, { type: "ui", load: String(i) }, "ghost sm")).join("")}</div></div>
+<div class="panel"><h2>Credits & disclaimer</h2><p>${esc(DISCLAIMER)}</p><p class="sm">Company logos, proprietary branding, private databases and copyrighted catalogues are not used. Prices, stock, lead times, freight rates, customs events and negotiations are generated by the game's own simulation. Free and open source.</p></div>`;
+    } };

@@ -60,6 +60,10 @@ test("freight quotes respect mode, weight and dangerous goods limits", () => {
   const a = freightQuote(s, dhl, "express", "DE", 20, 0.1, 1000, false), b = freightQuote(s, dhl, "express", "US", 20, 0.1, 1000, false); assert.ok(b.cost > a.cost * 0.9);
 });
 test("a ruinous quote loses money, a sane one does not (landed cost really matters)", () => {
-  const r1 = playOne(3, 14), r2 = playOne(3, -15); assert.ok(r1.s.stats.won >= r2.s.stats.won || true);
+  let cmp = null;
+  for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) { const r1 = playOne(seed, 14), r2 = playOne(seed, -15); if (r1.s.stats.delivered >= 1 && r2.s.stats.delivered >= 1) { cmp = [r1, r2]; break; } }
+  assert.ok(cmp, "some seed completes a delivery at both margins");
+  const prof = (r) => r.s.invoices.reduce((a, i) => a + i.amount - i.cogs, 0);
+  assert.ok(prof(cmp[0]) > 0, "a +14% quote earns a profit"); assert.ok(prof(cmp[1]) < 0, "a -15% quote loses money");
 });
 test("60-day idle run does not crash and RFQs keep arriving", () => { const s = createGame({ seed: 9 }); for (let i = 0; i < 60; i++) stepDay(s); assert.ok(s.rfqs.length >= 2); });
