@@ -19,6 +19,7 @@ const PAGES: Page[] = [dashboard, rfqs, orders, shipments, customs, market, ware
 const GROUPS = ["Operations", "Network", "Company", "Help"];
 let S: GameState = createGame();
 S.paused = true;
+let autoPause = true;
 let toastMsg = "", toastBad = false, toastT = 0;
 const root = $("#app")!;
 
@@ -67,6 +68,7 @@ document.addEventListener("click", (e) => {
 });
 function onChange(e: Event) {
   const el = e.target as HTMLInputElement; if (!el.dataset) return;
+  if (el.hasAttribute("data-ap")) { autoPause = el.checked; return; }
   if (el.dataset.chg) { const a = JSON.parse(el.dataset.chg); const v: any = el.type === "checkbox" ? el.checked : el.dataset.n ? +el.value : el.value; if (el.dataset.opt) a.opt = { [el.dataset.key!]: v }; else if (el.dataset.key) a[el.dataset.key] = v; run(a); return; }
   if (el.dataset.ui) { ui.q[el.dataset.ui] = el.value; render(); }
 }
@@ -112,7 +114,7 @@ function draw() {
   const sp = (n: number, l: string) => btn(l, { type: "setSpeed", value: n }, !s.paused && s.speed === n ? "on sm" : "sm");
   const html = `<div class="shell"><aside><div class="brand"><div class="logo">🌐</div><div><b>Global Procurement</b><span>TYCOON</span></div></div><nav>${nav}</nav><div class="aside-foot">Simulated data only</div></aside>
 <div class="main"><header class="top"><div class="co"><b>${esc(s.name)}</b><span>${dateStr(s.day)} · day ${s.day}</span></div><div class="hk"><label>Cash</label><b class="${s.cash < 0 ? "bad" : ""}">${money(s.cash)}</b></div><div class="hk"><label>Net worth</label><b>${money(netWorth(s).total)}</b></div><div class="hk"><label>Reputation</label><b>${Math.round(s.rep)}</b></div>
-<div class="clock">${btn(s.paused ? "▶ Paused" : "⏸ Pause", { type: "setPaused", value: !s.paused }, s.paused ? "warnb sm" : "sm")}${sp(1, "1×")}${sp(2, "2×")}${sp(3, "3×")}${btn("+1 day", { type: "advance", days: 1 }, "sm")}${btn("+7 days", { type: "advance", days: 7 }, "sm")}</div></header>
+<div class="clock"><label class="ap" title="Pauses the clock whenever a new RFQ arrives"><input type="checkbox" data-ap ${autoPause ? "checked" : ""}> Pause on new RFQ</label>${btn(s.paused ? "▶ Paused" : "⏸ Pause", { type: "setPaused", value: !s.paused }, s.paused ? "warnb sm" : "sm")}${sp(1, "1×")}${sp(2, "2×")}${sp(3, "3×")}${btn("+1 day", { type: "advance", days: 1 }, "sm")}${btn("+7 days", { type: "advance", days: 7 }, "sm")}</div></header>
 ${coach()}${s.over ? `<div class="gameover">GAME OVER: ${esc(s.over)} ${btn("New game", { type: "ui", modal: { kind: "newgame" } }, "pri sm")}</div>` : ""}
 <main id="page">${pg.render(s)}</main></div>${modal()}${toastMsg ? `<div class="toast ${toastBad ? "bad" : ""}">${esc(toastMsg)}</div>` : ""}</div>`;
   morph(root, html);
@@ -120,7 +122,7 @@ ${coach()}${s.over ? `<div class="gameover">GAME OVER: ${esc(s.over)} ${btn("New
 }
 
 let last = performance.now(), acc = 0;
-setInterval(() => { const now = performance.now(), dt = now - last; last = now; if (S.paused || S.over) return; acc += dt; const ms = 3000 / S.speed; let ran = false; while (acc >= ms) { acc -= ms; stepDay(S); ran = true; } if (ran) render(); }, 250);
+setInterval(() => { const now = performance.now(), dt = now - last; last = now; if (S.paused || S.over) return; acc += dt; const ms = 10000 / S.speed; let ran = false; const before = S.rfqs.length; while (acc >= ms) { acc -= ms; stepDay(S); ran = true; if (autoPause && S.rfqs.length > before) { S.paused = true; acc = 0; toast("New RFQ received. Game paused so you can read it. Press Play to continue."); break; } } if (ran) render(); }, 250);
 setInterval(() => { if (!S.over && S.day > 0) putSave("auto"); }, 300000);
 render();
 (window as any).__game = { get S() { return S; }, run, render, ui };

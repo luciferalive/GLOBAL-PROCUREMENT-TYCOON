@@ -82,7 +82,7 @@ export function genRfq(s, rng, client, urgent) {
     if (!lines.length)
         return genRfq(s, rng, client, urgent);
     const id = nid(s, "rfq");
-    const r = { id, no: `RFQ-${2026 + Math.floor(s.day / 365)}-${String(1200 + id).padStart(6, "0")}`, client: client.id, day: s.day, due: s.day + (urgent ? 3 : rng.int(6, 12)), needDays: urgent ? rng.int(8, 14) : rng.int(21, 60), dest: "Doha, Qatar", incoterm: "DAP", urgent, status: "new", lines, seen: false, cq: null, so: null, ship: {}, note: urgent ? "URGENT: customer needs a fast response." : "" };
+    const r = { id, no: `RFQ-${2026 + Math.floor(s.day / 365)}-${String(1200 + id).padStart(6, "0")}`, client: client.id, day: s.day, due: s.day + (urgent ? 7 : rng.int(14, 24)), needDays: urgent ? rng.int(8, 14) : rng.int(21, 60), dest: "Doha, Qatar", incoterm: "DAP", urgent, status: "new", lines, seen: false, cq: null, so: null, ship: {}, note: urgent ? "URGENT: customer needs a fast response." : "" };
     const nr = rng.chance(0.25) ? 0 : rng.chance(0.65) ? 1 : 2;
     if (nr) {
         const pool = RIVALS.slice().sort(() => rng.next() - 0.5).slice(0, nr);
