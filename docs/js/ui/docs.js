@@ -51,6 +51,9 @@ export function listDocs(s) {
         if (["customs", "held", "cleared", "delivered"].includes(sh.status))
             o.push({ ref: "cd:" + sh.id, kind: "Customs declaration", title: `Import declaration ${sh.no}`, day: sh.arrive });
     }
+    for (const so of s.sos)
+        if (so.exp)
+            o.push({ ref: "ex:" + so.id, kind: "Export declaration", title: `Export declaration ${so.no}`, day: so.day });
     for (const i of s.invoices) {
         o.push({ ref: "inv:" + i.id, kind: "Commercial invoice", title: i.no, day: i.issue });
         if (i.paid)
@@ -134,6 +137,11 @@ export function docHtml(s, ref) {
         const sh = s.ships.find((x) => x.id === n);
         const po = s.pos.find((p) => p.id === sh.po);
         return page("Customs Import Declaration", "IMP-" + sh.no.slice(4), sh.arrive, ME(s) + " (importer)", "Qatar Customs (simulated)", [["Origin", COUNTRY[sh.from]?.name ?? sh.from], ["Customs value", money2(po.value + sh.freight)], ["Status", sh.status.replace("_", " ")], ["Held until", sh.status === "held" ? "day " + sh.heldUntil : "-"], ["Documents", sh.docsOk ? "complete" : "query raised"]], ["Part number", "HS code", "Qty", "Category"], po.lines.map((l) => { const part = DB.partsById[l.partId]; return [part.pn, hsCode(part.cat), String(l.qty), CAT[part.cat]?.name ?? ""]; }), [["Duty", money2(sh.duty)], ["Clearance fee", money2(sh.clearance)], ["Local transport", money2(sh.local)]], "Duty is assessed on goods + freight + insurance. HS codes here are simulated, not real tariff classifications.");
+    }
+    if (k === "ex") {
+        const so = s.sos.find((x) => x.id === n), c = DB.clientById[so.client];
+        const e = so.exp;
+        return page("Export Declaration", "EXP-" + so.no.slice(3), so.day, ME(s) + " (exporter)", `${c.name}, ${COUNTRY[c.country].name} (consignee)`, [["Destination", COUNTRY[c.country].name], ["Mode", e.mode], ["Carrier", DB.logiById[e.logi]?.name ?? ""], ["Transit", e.days + " days"], ["Freight + clearance", money2(e.cost)], ["Incoterm", "DAP (customer pays import duty)"]], ["Part number", "HS code", "Qty"], so.lines.map((l) => [DB.partsById[l.partId].pn, hsCode(DB.partsById[l.partId].cat), String(l.qty)]), [], "Goods are exported from Qatar. Import duty and local clearance in the destination are for the consignee. (Simulated.)");
     }
     return `<p>Unknown document.</p>`;
 }

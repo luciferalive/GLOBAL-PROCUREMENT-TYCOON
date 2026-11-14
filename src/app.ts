@@ -11,11 +11,12 @@ import { docHtml } from "./ui/docs.js";
 import type { Page } from "./ui/pages1.js";
 import { dashboard, partLine, rfqs } from "./ui/pages1.js";
 import { finance, orders, shipments, warehouse } from "./ui/pages2.js";
+import { banking, network } from "./ui/pages6.js";
 import { achievements, reports } from "./ui/pages5.js";
 import { customs, competitors, market } from "./ui/pages4.js";
 import { company, customers, documents, industries, logisticsPage, newsPage, settings, suppliers, training } from "./ui/pages3.js";
 
-const PAGES: Page[] = [dashboard, rfqs, orders, shipments, customs, market, warehouse, suppliers, competitors, customers, logisticsPage, industries, company, finance, reports, achievements, documents, training, newsPage, settings];
+const PAGES: Page[] = [dashboard, rfqs, orders, shipments, customs, market, warehouse, network, suppliers, competitors, customers, logisticsPage, industries, company, finance, banking, reports, achievements, documents, training, newsPage, settings];
 const GROUPS = ["Operations", "Network", "Company", "Help"];
 let S: GameState = createGame();
 S.paused = true;

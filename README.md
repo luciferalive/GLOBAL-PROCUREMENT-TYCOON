@@ -8,7 +8,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178c6?style=for-the-badge&logo=typescript&logoColor=white)
 ![No backend](https://img.shields.io/badge/100%25-in_your_browser-22c55e?style=for-the-badge)
 ![Paid APIs](https://img.shields.io/badge/paid_APIs-zero-f59e0b?style=for-the-badge)
-![Tests](https://img.shields.io/badge/tests-10_passing-22c55e?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-13_passing-22c55e?style=for-the-badge)
 
 <img src="docs/shots/dashboard.png" alt="Control Tower" width="92%">
 
@@ -65,6 +65,9 @@ Sell above it. Always. Then check how much cash you must pay BEFORE the customer
 | 📈 **Market Watch** | Port strikes, airspace limits, component shortages, price hikes, demand booms, FX swings, port congestion. All with a countdown. |
 | 🗺️ **World map** | Animated routes for every shipment, coloured by transport mode. |
 | 📄 **18 document types** | RFQ, quotations, POs, packing lists, bills of lading, customs declarations, certificates of origin, invoices, receipts. Printable and stamped SIMULATED. |
+| 🏦 **Letters of credit** | A bank LC facility ($60k, raisable to $260k with reputation): 10% cash margin, 1.2% fee, and document checks that punish traders with weak paperwork. |
+| 🌍 **Export orders** | Foreign customers cost real outbound freight and export clearance, take longer to reach, and the cost shows up in the landed-cost table before you quote. |
+| 🏭 **Warehouse network** | Open hubs in Dubai, Istanbul, Shenzhen, Rotterdam and Singapore: more capacity, shorter transit from the regions they serve, rent due every month. |
 | 🏦 **Finance** | P&L, cash flow, bank loans, monthly payroll, 10% tax, prepay / LC / Net 30 / Net 60 terms. Bankruptcy is real. |
 | 🏆 **Achievements & Reports** | 22 trophies with live progress bars, win rate, on-time delivery, gross margin, revenue vs cost charts, top customers and suppliers. |
 | 🎓 **Training** | A 14-step campaign that ticks off as you do the real thing. |
@@ -105,7 +108,8 @@ Sell above it. Always. Then check how much cash you must pay BEFORE the customer
 - [x] **Stage 2:** customs actions, rival competitors, bill of lading / customs declaration / certificate of origin
 - [x] **Stage 3:** world events and Market Watch, FX history, regional shipping disruptions, demand booms
 - [x] **Stage 4:** achievements and business reports
-- [ ] **Next:** export processes, letters of credit, multiple warehouses, richer industry rules, more achievements
+- [x] **Stage 5:** letters of credit, export orders, satellite warehouses; RFQ clock slowed and deadlines lengthened
+- [ ] **Next:** richer industry-specific rules, multi-currency quotations, supplier relationship tiers, more events
 
 ## ⚠️ Simulation notice
 
@@ -115,7 +119,7 @@ Company names (Siemens, DHL, QatarEnergy and so on) appear **only as references 
 
 ```bash
 tsc -p tsconfig.json                 # src/ → docs/js
-node --test tests/*.test.mjs         # 10 end-to-end tests (full RFQ-to-cash cycle, books balance, determinism)
+node --test tests/*.test.mjs         # 13 end-to-end tests (full RFQ-to-cash cycle, books balance, determinism)
 ```
 
 Plain TypeScript, zero runtime dependencies, deterministic seeded RNG, money in integer cents. The static database is generated at load, so saves hold only your game state.

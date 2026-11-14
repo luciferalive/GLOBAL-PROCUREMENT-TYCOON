@@ -18,8 +18,11 @@ export const money2 = (c: Cents) => (c < 0 ? "-" : "") + "$" + (Math.abs(c) / 10
 export const monthKey = (day: number) => String(Math.floor(day / 30));
 export const emptyPl = (): Pl => ({ rev: 0, cogs: 0, salaries: 0, rent: 0, freight: 0, customs: 0, bank: 0, interest: 0, tax: 0, other: 0 });
 export const WH_BASE_M3 = 120, WH_STEP_M3 = 100, WH_RENT = 3000, WH_STEP_RENT = 1800;
-export const whCap = (s: GameState) => WH_BASE_M3 + (s.whSize - 1) * WH_STEP_M3;
-export const whRentMonth = (s: GameState) => WH_RENT + (s.whSize - 1) * WH_STEP_RENT;
+import { SITE } from "../data/sites.js";
+export const whCap = (s: GameState) => WH_BASE_M3 + (s.whSize - 1) * WH_STEP_M3 + (s.sites ?? []).reduce((a, id) => a + (SITE[id]?.cap ?? 0), 0);
+export const whRentMonth = (s: GameState) => WH_RENT + (s.whSize - 1) * WH_STEP_RENT + (s.sites ?? []).reduce((a, id) => a + (SITE[id]?.rent ?? 0), 0);
+export const LC_BASE = 60_000, LC_STEP = 40_000;
+export const lcOf = (s: GameState) => (s.lc ??= { limit: Math.round(LC_BASE * 100), used: 0 });
 export const CERT_COST: Record<string, { cost: number; days: number }> = { "ISO 9001": { cost: 8000, days: 30 }, "ISO 13485": { cost: 12000, days: 40 }, AS9120: { cost: 15000, days: 45 }, "IATF 16949": { cost: 12000, days: 40 }, "ISO 27001": { cost: 10000, days: 35 }, "Defence vendor clearance": { cost: 25000, days: 60 } };
 
 export function createGame(o: { name?: string; difficulty?: "easy" | "normal" | "hard"; seed?: number } = {}): GameState {
@@ -193,8 +196,9 @@ function logistics(s: GameState, rng: Rng) {
   for (const po of s.pos) {
     const sh = s.ships.find((x) => x.id === po.ship); if (!sh) continue; const sup = DB.supplierById[po.supplier];
     if (po.status === "placed" && s.day >= sh.depart) {
+      if (po.terms === "lc" && sup.docs !== "full" && !po.lcChecked) { po.lcChecked = true; if (rng.chance(sup.docs === "none" ? 0.55 : 0.3)) { sh.depart += 3; sh.arrive += 3; const fee = Math.round(150 * 100); if (s.cash >= fee) { cashOut(s, "bank", `LC discrepancy fee ${po.no}`, fee); plOf(s).bank += fee; } news(s, `Bank found document discrepancies on the letter of credit for ${po.no} (${sup.name}). Shipment held 3 days, fee charged. Suppliers with full documents avoid this.`, "warn"); continue; } }
       po.status = "shipped"; sh.status = "in_transit";
-      if (po.terms === "lc") cashOut(s, "supplier", `LC payment ${po.no} to ${sup.name}`, po.value);
+      if (po.terms === "lc") { const lc = lcOf(s); cashOut(s, "supplier", `LC payment ${po.no} to ${sup.name}`, po.value - (po.lcMargin ?? 0)); lc.used = Math.max(0, lc.used - po.value); }
       else if (po.terms === "net30" || po.terms === "net60") s.payables.push({ id: nid(s, "pay"), to: sup.name, kind: "supplier", ref: po.no, amount: po.value, due: s.day + (po.terms === "net30" ? 30 : 60), paid: false, po: po.id });
       if (!sh.supplierArranged && sh.freight > 0) { s.payables.push({ id: nid(s, "pay"), to: DB.logiById[sh.logi]?.name ?? "Freight", kind: "freight", ref: sh.no, amount: sh.freight, due: s.day + 7, paid: false, po: po.id }); plOf(s).freight += sh.freight; }
       news(s, `${po.no} dispatched by ${sup.name} (${sh.no}). ETA ${sh.arrive - s.day} days.`, "info");

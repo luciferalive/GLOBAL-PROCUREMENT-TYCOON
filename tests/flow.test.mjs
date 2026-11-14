@@ -4,6 +4,7 @@ import { dispatch } from "../docs/js/engine/actions.js";
 import { stepDay } from "../docs/js/engine/core.js";
 import { DB } from "../docs/js/data/db.js";
 import { landedCost, freightQuote } from "../docs/js/engine/pricing.js";
+import { lcOf, whCap, whRentMonth } from "../docs/js/engine/core.js";
 
 function shipFor(s, r) { // choose a valid freight option for every supplier that needs one
   const land = landedCost(s, r);
@@ -13,13 +14,15 @@ function shipFor(s, r) { // choose a valid freight option for every supplier tha
     for (const lg of DB.logistics) for (const mode of lg.modes) { if (done) continue; const set = { type: "setShip", rfq: r.id, supplier: sup.id, logi: lg.id, mode, insure: true }; dispatch(s, set); if (!landedCost(s, r).issues.some((x) => x.includes(sup.name))) done = true; }
   }
 }
-function playOne(seed, margin = 14) {
+function playOne(seed, margin = 14, opt = {}) {
   const s = createGame({ seed });
   const log = [];
   for (let guard = 0; guard < 400 && s.stats.delivered < 1 && !s.over; guard++) {
     for (const r of s.rfqs) {
+      if (r.status === "new" && opt.foreign && !r.fx) { r.fx = 1; const c = DB.clients.find((x) => x.country === opt.foreign); r.client = c.id; }
       if (r.status === "new") { dispatch(s, { type: "openRfq", id: r.id }); r.lines.forEach((_, li) => dispatch(s, { type: "autoQuotes", rfq: r.id, line: li, max: 5 })); }
       if (r.status === "sourcing" && r.lines.every((_, li) => s.quotes.some((q) => q.rfq === r.id && q.line === li && q.status === "received")) ) {
+        if (opt.lc) for (const q of s.quotes) if (q.rfq === r.id) q.terms = "lc";
         dispatch(s, { type: "autoAlloc", rfq: r.id }); shipFor(s, r); 
         r.lines.forEach((l, li) => dispatch(s, { type: "setMargin", rfq: r.id, line: li, pct: margin }));
         const res = dispatch(s, { type: "sendQuote", rfq: r.id }); if (!res.ok) log.push(res.msg);
@@ -88,3 +91,25 @@ test("world events: disruptions raise freight and lengthen transit, and expire",
   s.day += 11; assert.equal(freightQuote(s, dhl, "airfreight", "DE", 100, 1, 1000, false).cost, before.cost);
 });
 test("120 days with random events never crashes and logs FX history", () => { const s = createGame({ seed: 21 }); for (let i = 0; i < 120; i++) stepDay(s); assert.ok(s.fxHist.EUR.length >= 20); });
+
+test("letters of credit: margin deposit, limit enforced, limit freed on payment", () => {
+  let r = null; for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) { const x = playOne(seed, 14, { lc: true }); if (x.s.pos.some((p) => p.terms === "lc")) { r = x; break; } }
+  assert.ok(r, "an LC purchase order gets placed"); const s = r.s; const po = s.pos.find((p) => p.terms === "lc");
+  assert.ok(po.lcMargin > 0 && Math.abs(po.lcMargin - po.value * 0.1) <= 1, "10% margin recorded");
+  for (let i = 0; i < 90; i++) stepDay(s); assert.equal(lcOf(s).used, 0, "limit freed after all LC shipments");
+  const s2 = createGame({ seed: 9 }); lcOf(s2).limit = 100; assert.equal(lcOf(s2).used, 0);
+  assert.equal(dispatch(s2, { type: "lcIncrease" }).ok, true, "first increase allowed"); assert.ok(lcOf(s2).limit > 100);
+});
+test("export orders: foreign customer adds outbound freight to landed cost and cash", () => {
+  let r = null; for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) { const x = playOne(seed, 25, { foreign: "DE" }); if (x.s.sos.some((o) => o.exp)) { r = x; break; } }
+  assert.ok(r, "an export delivery is dispatched"); const so = r.s.sos.find((o) => o.exp); assert.ok(so.exp.cost > 0 && so.exp.days >= 1);
+  const rf = r.s.rfqs.find((x) => x.id === so.rfq); const land = landedCost(r.s, rf); assert.ok(Object.values(land.lines).flat().some((x) => x.exp > 0), "landed cost includes export freight");
+});
+test("satellite warehouses add capacity and rent, cut transit, and can be closed only if stock fits", () => {
+  const s = createGame({ seed: 3 }); const cap0 = whCap(s), rent0 = whRentMonth(s); const dhl = DB.logistics.find((l) => l.modes.includes("sea") && freightQuote(s, l, "sea", "CN", 100, 1, 1000, false).ok);
+  const t0 = freightQuote(s, dhl, "sea", "CN", 100, 1, 1000, false).days;
+  assert.ok(dispatch(s, { type: "openSite", id: "shenzhen" }).ok); assert.ok(whCap(s) > cap0 && whRentMonth(s) > rent0);
+  assert.equal(freightQuote(s, dhl, "sea", "CN", 100, 1, 1000, false).days, t0 - 3);
+  assert.equal(dispatch(s, { type: "openSite", id: "shenzhen" }).ok, false, "cannot open twice");
+  assert.ok(dispatch(s, { type: "closeSite", id: "shenzhen" }).ok); assert.equal(whCap(s), cap0);
+});

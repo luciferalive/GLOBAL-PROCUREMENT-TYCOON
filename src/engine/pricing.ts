@@ -1,5 +1,6 @@
 import { COUNTRY, km } from "../data/countries.js";
 import { CAT } from "../data/lists.js";
+import { SITE } from "../data/sites.js";
 import { DB, type Logistic, type Mode, type Part, type Supplier } from "../data/db.js";
 import type { Cents, GameState, Quote, Rfq } from "./types.js";
 import { Rng, hash } from "./rng.js";
@@ -59,12 +60,18 @@ export function freightQuote(s: GameState, lg: Logistic, mode: Mode, origin: str
   const base = ch * (lg.rate[mode] ?? 1) * factor * o.freightIdx * mm * (rh ? rh.f : 1);
   const cost = (Math.max(lg.min, base) * (1 + lg.fuel * mm) + lg.docFee + lg.collect);
   const days0 = Math.round(mode === "express" ? 2 + d / 9000 : mode === "airfreight" ? 3 + d / 5000 : mode === "economy" ? 6 + d / 4000 : mode === "sea" ? 12 + d / 450 : mode === "road" ? 3 + d / 700 : 14 + d / 700);
-  const days = days0 + (rh ? rh.d : 0);
+  const hub = Math.max(0, ...(s.sites ?? []).map((id) => (SITE[id]?.regions.includes(o.region) ? SITE[id].bonus : 0)));
+  const days = Math.max(1, days0 + (rh ? rh.d : 0) - hub);
   return { ok: true, cost: toC(cost), days, ins: insure ? Math.max(500, Math.round(valueC * lg.insPct)) : 0, chargeable: Math.round(ch) };
 }
 
+export function exportOpt(s: GameState, dest: string, kg: number, vol: number, valueC: number) {
+  if (dest === "QA" || !COUNTRY[dest]) return null; type O = { cost: number; days: number; mode: string; logi: string }; let best: O | null = null, fast: O | null = null;
+  for (const lg of DB.logistics) for (const mode of lg.modes) { if (mode === "rail") continue; const f = freightQuote(s, lg, mode, dest, kg, vol, valueC, false, false); if (!f.ok) continue; const o: O = { cost: f.cost + toC(60), days: f.days + 1, mode, logi: lg.id }; if (!fast || o.days < fast.days) fast = o; if (o.days <= 21 && (!best || o.cost < best.cost)) best = o; }
+  return best ?? fast;
+}
 // ---------------- landed cost
-export interface LandedLine { partId: string; qty: number; purchase: Cents; freight: Cents; insurance: Cents; duty: Cents; clearance: Cents; local: Cents; bank: Cents; total: Cents; unit: Cents; etaDays: number; kg: number; vol: number; supplier: string; fromStock: boolean; alt: boolean; docs: "full" | "basic" | "none"; sourceType: string }
+export interface LandedLine { partId: string; qty: number; purchase: Cents; freight: Cents; insurance: Cents; duty: Cents; clearance: Cents; local: Cents; bank: Cents; total: Cents; unit: Cents; etaDays: number; kg: number; vol: number; supplier: string; fromStock: boolean; alt: boolean; docs: "full" | "basic" | "none"; sourceType: string; exp?: Cents }
 export interface Landed { lines: Record<number, LandedLine[]>; byLine: Record<number, { qty: number; total: Cents; unit: Cents; eta: number; short: number; alt: boolean; docs: string; oemSource: boolean }>; complete: boolean; total: Cents; eta: number; issues: string[] }
 export function dutyRate(part: Part, origin: string) { return CAT[part.cat].group === "med" ? 0 : COUNTRY[origin].duty / 100; }
 export function landedCost(s: GameState, rfq: Rfq): Landed {
@@ -101,6 +108,9 @@ export function landedCost(s: GameState, rfq: Rfq): Landed {
     const lot = s.lots.find((x) => x.id === r.lot); if (!lot) continue;
     (lines[r.li] ??= []).push({ partId: lot.partId, qty: r.qty, purchase: r.qty * lot.unitCost, freight: 0, insurance: 0, duty: 0, clearance: 0, local: 0, bank: 0, total: r.qty * lot.unitCost, unit: lot.unitCost, etaDays: 1, kg: 0, vol: 0, supplier: "stock", fromStock: true, alt: false, docs: "full", sourceType: "stock" });
   }
+  const dest = DB.clientById[rfq.client]?.country;
+  if (dest && dest !== "QA") { const all = Object.values(lines).flat(); const wt = (x: LandedLine) => x.qty * DB.partsById[x.partId].kg; const kgT = all.reduce((a, x) => a + wt(x), 0), volT = all.reduce((a, x) => a + x.qty * DB.partsById[x.partId].vol, 0), valT = all.reduce((a, x) => a + x.purchase, 0);
+    if (all.length) { const o = exportOpt(s, dest, kgT, volT, Math.round(valT * 1.2)); if (o) for (const x of all) { x.exp = Math.round(o.cost * (wt(x) / Math.max(0.0001, kgT))); x.total += x.exp; x.unit = Math.round(x.total / x.qty); x.etaDays += o.days; } else issues.push(`No carrier can ship this cargo to ${COUNTRY[dest].name}.`); } }
   const byLine: Landed["byLine"] = {}; let total = 0, eta = 0, complete = true;
   rfq.lines.forEach((l, li) => {
     const ls = lines[li] ?? []; const qty = ls.reduce((a, x) => a + x.qty, 0), t = ls.reduce((a, x) => a + x.total, 0), e = ls.reduce((a, x) => Math.max(a, x.etaDays), 0);

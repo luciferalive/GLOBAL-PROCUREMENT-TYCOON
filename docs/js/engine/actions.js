@@ -1,6 +1,9 @@
 import { COUNTRY } from "../data/countries.js";
 import { CAT, IND } from "../data/lists.js";
 import { DB } from "../data/db.js";
+import { SITE } from "../data/sites.js";
+import { exportOpt } from "./pricing.js";
+import { LC_STEP, lcOf, stockUsed } from "./core.js";
 import { CERT_COST, R, cashOut, inspectLot, isOpen, money, netWorth, news, nid, plOf, registrationCheck, stepDay, whCap, whRentMonth, WH_STEP_RENT } from "./core.js";
 import { FREIGHT_INCLUDED, MONTHLY, eligible, freightQuote, landedCost, makeQuote, supplierStaffDelay, toC } from "./pricing.js";
 const ok = (msg) => ({ ok: true, msg }), bad = (msg) => ({ ok: false, msg });
@@ -75,6 +78,49 @@ export function dispatch(s, a) {
             plOf(s).customs += fee;
             sh.heldUntil = s.day;
             return ok(`Priority clearance paid. ${sh.no} is released tomorrow.`);
+        }
+        case "lcIncrease": {
+            const lc = lcOf(s);
+            const steps = Math.round((lc.limit / 100 - 60000) / LC_STEP);
+            if (steps >= 5)
+                return bad("The bank will not go above $260,000 for a company of your size.");
+            const needRep = 20 + steps * 12;
+            if (s.rep < needRep)
+                return bad(`The bank wants reputation ${needRep} before raising your limit. You have ${Math.round(s.rep)}.`);
+            if (s.loans.reduce((t, l) => t + l.left, 0) > lc.limit * 0.8)
+                return bad("Too much existing debt. Repay some loans first.");
+            const fee = toC(300);
+            if (s.cash < fee)
+                return bad("Not enough cash for the $300 review fee.");
+            cashOut(s, "bank", "LC limit review fee", fee);
+            plOf(s).bank += fee;
+            lc.limit += toC(LC_STEP);
+            return ok(`Letter of credit limit raised to ${money(lc.limit)}.`);
+        }
+        case "openSite": {
+            const st = SITE[a.id];
+            if (!st)
+                return bad("Unknown site.");
+            s.sites ??= [];
+            if (s.sites.includes(st.id))
+                return bad("Already open.");
+            const dep = toC(st.setup);
+            if (s.cash < dep)
+                return bad(`Setup costs ${money(dep)}.`);
+            cashOut(s, "storage", `Warehouse setup ${st.city}`, dep);
+            plOf(s).other += dep;
+            s.sites.push(st.id);
+            news(s, `New warehouse opened in ${st.city}: +${st.cap} m3, ${money(toC(st.rent))}/month.`, "good");
+            return ok(`${st.city} warehouse is open.`);
+        }
+        case "closeSite": {
+            const st = SITE[a.id];
+            if (!st || !(s.sites ?? []).includes(st.id))
+                return bad("That site is not open.");
+            if (stockUsed(s) > whCap(s) - st.cap)
+                return bad("Your stock would not fit without it. Deliver or sell stock first.");
+            s.sites = s.sites.filter((x) => x !== st.id);
+            return ok(`${st.city} warehouse closed.`);
         }
         case "viewLanded":
             s.flags.landed_viewed = true;
@@ -287,8 +333,25 @@ export function dispatch(s, a) {
                 return bad("No inspected stock reserved for this order yet.");
             if (avail < need && !partialOk)
                 return bad("Stock is not complete. Offer partial shipment in the quotation, or wait for all items.");
+            const cl = DB.clientById[so.client];
+            let extra = 0;
+            if (cl.country !== "QA") {
+                let kg = 0, vol = 0, val = 0;
+                so.lines.forEach((l, i) => { const t = Math.min(l.qty - l.delivered, s.lots.filter((x) => x.so === so.id && x.soLine === i && x.status === "ok").reduce((q, x) => q + x.qty, 0)); const p = DB.partsById[l.partId]; kg += t * p.kg; vol += t * p.vol; val += t * toC(p.list); });
+                const ex = exportOpt(s, cl.country, kg, vol, val);
+                if (!ex)
+                    return bad(`No carrier can ship this cargo to ${COUNTRY[cl.country].name} right now.`);
+                if (s.cash < ex.cost)
+                    return bad(`Export freight and clearance cost ${money(ex.cost)}. Not enough cash.`);
+                cashOut(s, "freight", `Export freight & clearance ${so.no} to ${COUNTRY[cl.country].name}`, ex.cost);
+                plOf(s).freight += ex.cost;
+                so.exp = ex;
+                extra = ex.days;
+                s.flags.exported = true;
+                news(s, `Export shipment for ${so.no} leaves Doha for ${COUNTRY[cl.country].name} by ${ex.mode} (${ex.days} days). Export declaration filed.`, "info");
+            }
             so.status = "delivering";
-            so.deliveryDay = s.day + 1 + (s.staff.warehouse === 0 ? 1 : 0);
+            so.deliveryDay = s.day + 1 + extra + (s.staff.warehouse === 0 ? 1 : 0);
             return ok("Picked and packed. Delivery note issued. Arrives at the customer tomorrow.");
         }
         case "topUp": { // quick local purchase to cover a shortage
@@ -532,6 +595,14 @@ function placeOrders(s, a, rng) {
     }
     // cash needed for prepay
     const need = Object.entries(groups).reduce((t, [sid, g]) => t + (g[0].q.terms === "prepay" ? g.reduce((x, y) => x + y.qty * y.q.unit, 0) : 0), 0);
+    const lcVal = Object.values(groups).reduce((t, g) => t + (g[0].q.terms === "lc" ? g.reduce((x, y) => x + y.qty * y.q.unit, 0) : 0), 0);
+    if (lcVal) {
+        const lc = lcOf(s);
+        if (lc.used + lcVal > lc.limit)
+            return bad(`Letter of credit limit exceeded: this order needs ${money(lcVal)} but only ${money(lc.limit - lc.used)} of your ${money(lc.limit)} bank limit is free. Pay a supplier first or ask the bank for a higher limit (Banking page).`);
+        if (Math.round(lcVal * 0.1) + need > s.cash)
+            return bad(`The bank wants a 10% cash margin deposit (${money(Math.round(lcVal * 0.1))}) to open the letter(s) of credit.`);
+    }
     if (need > s.cash)
         return bad(`Prepayment needed: ${money(need)}. You have ${money(s.cash)}. Take a loan or negotiate credit terms.`);
     for (const [sid, g] of Object.entries(groups)) {
@@ -566,6 +637,11 @@ function placeOrders(s, a, rng) {
         const dutyC = inc === "DDP" || sup.country === "QA" ? 0 : g.reduce((t, x) => t + Math.round((x.qty * x.q.unit + (fr + ins) * ((x.qty * DB.partsById[x.q.partId].kg) / Math.max(0.0001, kg))) * (CAT[DB.partsById[x.q.partId].cat].group === "med" ? 0 : COUNTRY[sup.country].duty / 100)), 0);
         const po = { id: poId, no: `PO-${String(3000 + poId)}`, so: so.id, supplier: sid, lines: g.map((x) => ({ partId: x.q.partId, qty: x.qty, unit: x.q.unit, soLine: x.soLine })), day: s.day, readyDay: s.day + lead + delay, incoterm: inc, terms: g[0].q.terms, status: "placed", ship: shId, value, delayed: delay, wrongItem: rng.chance(sup.risk * 0.6), prepaid: g[0].q.terms === "prepay", docs: g[0].q.docs };
         const sh = { id: shId, no: `SHP-${String(8000 + shId)}`, po: poId, logi: logi || "supplier", mode, from: sup.country, day: s.day, depart: s.day + lead + delay, arrive: s.day + lead + delay + days + (lg2 && rng.chance(1 - lg2.reliab) ? rng.int(1, 5) : 0), status: "booked", kg, vol, freight: fr + ins, insured: !!pick?.insure, duty: dutyC, clearance: sup.country === "QA" ? 0 : toC(85), local: sup.country === "QA" ? 0 : toC(Math.max(45, kg * 0.12)), heldUntil: 0, supplierArranged: arranged, inspect: false, docsOk: true, dutyPaid: false, cleared: false };
+        if (po.terms === "lc") {
+            po.lcMargin = Math.round(value * 0.1);
+            cashOut(s, "supplier", `LC margin deposit ${po.no}`, po.lcMargin);
+            lcOf(s).used += value;
+        }
         s.pos.push(po);
         s.ships.push(sh);
         for (const x of g)

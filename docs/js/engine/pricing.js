@@ -1,5 +1,6 @@
 import { COUNTRY, km } from "../data/countries.js";
 import { CAT } from "../data/lists.js";
+import { SITE } from "../data/sites.js";
 import { DB } from "../data/db.js";
 import { hash } from "./rng.js";
 export const usd = (cents) => cents / 100;
@@ -65,8 +66,28 @@ export function freightQuote(s, lg, mode, origin, kg, vol, valueC, insure, dg = 
     const base = ch * (lg.rate[mode] ?? 1) * factor * o.freightIdx * mm * (rh ? rh.f : 1);
     const cost = (Math.max(lg.min, base) * (1 + lg.fuel * mm) + lg.docFee + lg.collect);
     const days0 = Math.round(mode === "express" ? 2 + d / 9000 : mode === "airfreight" ? 3 + d / 5000 : mode === "economy" ? 6 + d / 4000 : mode === "sea" ? 12 + d / 450 : mode === "road" ? 3 + d / 700 : 14 + d / 700);
-    const days = days0 + (rh ? rh.d : 0);
+    const hub = Math.max(0, ...(s.sites ?? []).map((id) => (SITE[id]?.regions.includes(o.region) ? SITE[id].bonus : 0)));
+    const days = Math.max(1, days0 + (rh ? rh.d : 0) - hub);
     return { ok: true, cost: toC(cost), days, ins: insure ? Math.max(500, Math.round(valueC * lg.insPct)) : 0, chargeable: Math.round(ch) };
+}
+export function exportOpt(s, dest, kg, vol, valueC) {
+    if (dest === "QA" || !COUNTRY[dest])
+        return null;
+    let best = null, fast = null;
+    for (const lg of DB.logistics)
+        for (const mode of lg.modes) {
+            if (mode === "rail")
+                continue;
+            const f = freightQuote(s, lg, mode, dest, kg, vol, valueC, false, false);
+            if (!f.ok)
+                continue;
+            const o = { cost: f.cost + toC(60), days: f.days + 1, mode, logi: lg.id };
+            if (!fast || o.days < fast.days)
+                fast = o;
+            if (o.days <= 21 && (!best || o.cost < best.cost))
+                best = o;
+        }
+    return best ?? fast;
 }
 export function dutyRate(part, origin) { return CAT[part.cat].group === "med" ? 0 : COUNTRY[origin].duty / 100; }
 export function landedCost(s, rfq) {
@@ -127,6 +148,24 @@ export function landedCost(s, rfq) {
                 continue;
             (lines[r.li] ??= []).push({ partId: lot.partId, qty: r.qty, purchase: r.qty * lot.unitCost, freight: 0, insurance: 0, duty: 0, clearance: 0, local: 0, bank: 0, total: r.qty * lot.unitCost, unit: lot.unitCost, etaDays: 1, kg: 0, vol: 0, supplier: "stock", fromStock: true, alt: false, docs: "full", sourceType: "stock" });
         }
+    const dest = DB.clientById[rfq.client]?.country;
+    if (dest && dest !== "QA") {
+        const all = Object.values(lines).flat();
+        const wt = (x) => x.qty * DB.partsById[x.partId].kg;
+        const kgT = all.reduce((a, x) => a + wt(x), 0), volT = all.reduce((a, x) => a + x.qty * DB.partsById[x.partId].vol, 0), valT = all.reduce((a, x) => a + x.purchase, 0);
+        if (all.length) {
+            const o = exportOpt(s, dest, kgT, volT, Math.round(valT * 1.2));
+            if (o)
+                for (const x of all) {
+                    x.exp = Math.round(o.cost * (wt(x) / Math.max(0.0001, kgT)));
+                    x.total += x.exp;
+                    x.unit = Math.round(x.total / x.qty);
+                    x.etaDays += o.days;
+                }
+            else
+                issues.push(`No carrier can ship this cargo to ${COUNTRY[dest].name}.`);
+        }
+    }
     const byLine = {};
     let total = 0, eta = 0, complete = true;
     rfq.lines.forEach((l, li) => {
