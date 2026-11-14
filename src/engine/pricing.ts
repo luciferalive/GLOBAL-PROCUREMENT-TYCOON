@@ -26,16 +26,27 @@ export function eligible(s: GameState, part: Part): { sup: Supplier; alt: boolea
 }
 export function supplierStaffDelay(s: GameState, base: number) { return Math.max(1, Math.round(base * (1 - 0.1 * Math.min(4, s.staff.proc - 1)))); }
 
+export const TIERS = [
+  { id: "new", name: "New", orders: 0, value: 0, disc: 0, lead: 1, terms: "" },
+  { id: "trusted", name: "Trusted", orders: 3, value: 0, disc: 0.01, lead: 0.95, terms: "" },
+  { id: "preferred", name: "Preferred", orders: 8, value: 40_000, disc: 0.025, lead: 0.9, terms: "net30" },
+  { id: "strategic", name: "Strategic partner", orders: 15, value: 120_000, disc: 0.04, lead: 0.85, terms: "net60" },
+];
+export function supTier(s: GameState, sid: string) {
+  const st = s.supStats?.[sid]; const eff = (st?.orders ?? 0) - 2 * (st?.bad ?? 0), val = (st?.value ?? 0) / 100; let t = TIERS[0];
+  for (const x of TIERS) if (eff >= x.orders && val >= x.value) t = x; return t;
+}
 export function makeQuote(s: GameState, rfq: Rfq, line: number, sup: Supplier, alt: boolean, rng: Rng, id: string): Quote {
   const l = rfq.lines[line], part = DB.partsById[l.partId];
   const inco = sup.type === "local" ? (sup.country === "QA" ? "DAP" : "DAP") : sup.type === "oem" ? rng.pick(["EXW", "FCA", "FOB", "CIF", "DAP"]) : rng.pick(["EXW", "FOB", "CIF", "CIP", "DAP", "FCA", "DDP"]);
   const qdisc = l.qty >= 50 ? 0.94 : l.qty >= 10 ? 0.97 : 1;
-  const base = part.list * (alt ? rng.range(0.6, 0.78) : sup.priceF) * priceMod(s, part.oem) * rng.range(0.965, 1.04) * qdisc * (INCO_UP[inco] ?? 1);
+  const tier = supTier(s, sup.id);
+  const base = (1 - tier.disc) * part.list * (alt ? rng.range(0.6, 0.78) : sup.priceF) * priceMod(s, part.oem) * rng.range(0.965, 1.04) * qdisc * (INCO_UP[inco] ?? 1);
   const inStock = rng.chance(sup.stockP);
   const qtyAvail = inStock ? Math.max(1, Math.ceil(l.qty * rng.range(0.55, 1.6))) : 0;
   const lead = inStock ? Math.max(1, Math.round(sup.leadD / 3)) : Math.round(sup.leadD * rng.range(0.8, 1.4));
   const reply = s.day + supplierStaffDelay(s, sup.respD + rng.int(0, 2));
-  return { id, rfq: rfq.id, line, supplier: sup.id, partId: l.partId, status: "pending", askedDay: s.day, replyDay: reply, expiry: reply + rng.int(14, 28), unit: toC(base), cur: COUNTRY[sup.country].cur, fx: fxOf(s, COUNTRY[sup.country].cur), qtyAvail, inStock, leadD: lead, warrantyM: sup.type === "oem" ? 24 : sup.type === "trader" ? 6 : 12, incoterm: inco, terms: sup.terms, docs: alt ? "basic" : sup.docs, round: 0, note: alt ? "Generic equivalent: needs customer approval" : "", negBusyUntil: 0, moq: sup.type === "oem" ? Math.max(1, Math.min(l.qty, rng.int(1, 3))) : 1, alt };
+  return { id, rfq: rfq.id, line, supplier: sup.id, partId: l.partId, status: "pending", askedDay: s.day, replyDay: reply, expiry: reply + rng.int(14, 28), unit: toC(base), cur: COUNTRY[sup.country].cur, fx: fxOf(s, COUNTRY[sup.country].cur), qtyAvail, inStock, leadD: Math.max(1, Math.round(lead * tier.lead)), warrantyM: sup.type === "oem" ? 24 : sup.type === "trader" ? 6 : 12, incoterm: inco, terms: ((tier.terms === "net60" && sup.terms !== "net60") || (tier.terms === "net30" && (sup.terms === "prepay" || sup.terms === "lc")) ? tier.terms : sup.terms) as never, docs: alt ? "basic" : sup.docs, round: 0, note: alt ? "Generic equivalent: needs customer approval" : "", negBusyUntil: 0, moq: sup.type === "oem" ? Math.max(1, Math.min(l.qty, rng.int(1, 3))) : 1, alt };
 }
 
 // ---------------- freight

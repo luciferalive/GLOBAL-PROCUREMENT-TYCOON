@@ -5,6 +5,9 @@ import { stepDay } from "../docs/js/engine/core.js";
 import { DB } from "../docs/js/data/db.js";
 import { landedCost, freightQuote } from "../docs/js/engine/pricing.js";
 import { lcOf, whCap, whRentMonth } from "../docs/js/engine/core.js";
+import { supTier, makeQuote } from "../docs/js/engine/pricing.js";
+import { assess } from "../docs/js/engine/sales.js";
+import { Rng } from "../docs/js/engine/rng.js";
 
 function shipFor(s, r) { // choose a valid freight option for every supplier that needs one
   const land = landedCost(s, r);
@@ -17,12 +20,13 @@ function shipFor(s, r) { // choose a valid freight option for every supplier tha
 function playOne(seed, margin = 14, opt = {}) {
   const s = createGame({ seed });
   const log = [];
-  for (let guard = 0; guard < 400 && s.stats.delivered < 1 && !s.over; guard++) {
+  for (let guard = 0; guard < 500 && (opt.cur ? !s.invoices.some((i) => i.cur) : s.stats.delivered < 1) && !s.over; guard++) {
     for (const r of s.rfqs) {
       if (r.status === "new" && opt.foreign && !r.fx) { r.fx = 1; const c = DB.clients.find((x) => x.country === opt.foreign); r.client = c.id; }
       if (r.status === "new") { dispatch(s, { type: "openRfq", id: r.id }); r.lines.forEach((_, li) => dispatch(s, { type: "autoQuotes", rfq: r.id, line: li, max: 5 })); }
       if (r.status === "sourcing" && r.lines.every((_, li) => s.quotes.some((q) => q.rfq === r.id && q.line === li && q.status === "received")) ) {
         if (opt.lc) for (const q of s.quotes) if (q.rfq === r.id) q.terms = "lc";
+        if (opt.cur) dispatch(s, { type: "setCq", rfq: r.id, opt: { cur: opt.cur } });
         dispatch(s, { type: "autoAlloc", rfq: r.id }); shipFor(s, r); 
         r.lines.forEach((l, li) => dispatch(s, { type: "setMargin", rfq: r.id, line: li, pct: margin }));
         const res = dispatch(s, { type: "sendQuote", rfq: r.id }); if (!res.ok) log.push(res.msg);
@@ -112,4 +116,26 @@ test("satellite warehouses add capacity and rent, cut transit, and can be closed
   assert.equal(freightQuote(s, dhl, "sea", "CN", 100, 1, 1000, false).days, t0 - 3);
   assert.equal(dispatch(s, { type: "openSite", id: "shenzhen" }).ok, false, "cannot open twice");
   assert.ok(dispatch(s, { type: "closeSite", id: "shenzhen" }).ok); assert.equal(whCap(s), cap0);
+});
+
+test("supplier relationship tiers: orders and value unlock better prices, wrong items set you back", () => {
+  const s = createGame({ seed: 4 }); const sup = DB.suppliers.find((x) => x.type === "oem"); assert.equal(supTier(s, sup.id).id, "new");
+  s.supStats = { [sup.id]: { orders: 8, value: 5_000_000, bad: 0 } }; assert.equal(supTier(s, sup.id).id, "preferred");
+  s.supStats[sup.id].bad = 3; assert.notEqual(supTier(s, sup.id).id, "preferred", "bad deliveries cost you a tier");
+  const r = s.rfqs[0]; const mk = () => makeQuote(s, r, 0, sup, false, new Rng(99), "q"); s.supStats[sup.id] = { orders: 0, value: 0, bad: 0 }; const base = mk();
+  s.supStats[sup.id] = { orders: 16, value: 20_000_000, bad: 0 }; const best = mk(); assert.ok(best.unit < base.unit && best.leadD <= base.leadD, "strategic partner prices are lower");
+});
+test("multi-currency: a EUR quotation becomes a EUR sales order, and paying later in EUR creates an FX gain or loss", () => {
+  let won = null; for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) { const x = playOne(seed, 25, { foreign: "DE", cur: "EUR" }); if (x.s.sos.some((o) => o.cur === "EUR" && o.fxAt > 0)) { won = x; break; } }
+  assert.ok(won, "the quotation currency is carried onto the sales order, with the locked rate");
+  const s = createGame({ seed: 12 }); const c = DB.clients.find((x) => x.country === "DE");
+  const inv = { id: 999, no: "INV-T", so: 1, client: c.id, amount: 100000, issue: 0, due: 1, payDay: 1, paid: false, cogs: 0, cur: "EUR", fc: Math.round(100000 * 0.92) };
+  s.invoices.push(inv); s.fx.EUR = 0.92 * 1.15; const cash0 = s.cash; stepDay(s);
+  assert.ok(inv.paid && s.cash - cash0 < 100000, "weaker euro means fewer dollars arrive"); assert.ok(/FX loss/.test(s.ledger.find((l) => l.text.includes("INV-T")).text));
+});
+test("industry rules change how hard a customer bargains", () => {
+  const s = createGame({ seed: 6 }); const c = DB.clients.find((x) => x.industry === "construction"); const orig = c.industry;
+  const rf = { client: c.id, needDays: 30, lines: [{ ref: 100, qty: 1 }], cq: { lineUnits: [100], termsDays: c.terms, promiseDays: 10, warrantyM: 12 } };
+  c.industry = "general"; const a1 = assess(s, rf); c.industry = orig; const a2 = assess(s, rf);
+  assert.ok(Math.abs(a2.qe - a1.qe - 0.03) < 1e-9, "construction adds 3 points of price pressure");
 });

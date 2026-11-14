@@ -4,6 +4,7 @@ import { DB } from "../data/db.js";
 import { SITE } from "../data/sites.js";
 import { exportOpt } from "./pricing.js";
 import { LC_STEP, lcOf, stockUsed } from "./core.js";
+import { cashIn } from "./core.js";
 import { CERT_COST, R, cashOut, inspectLot, isOpen, money, netWorth, news, nid, plOf, registrationCheck, stepDay, whCap, whRentMonth, WH_STEP_RENT } from "./core.js";
 import { FREIGHT_INCLUDED, MONTHLY, eligible, freightQuote, landedCost, makeQuote, supplierStaffDelay, toC } from "./pricing.js";
 const ok = (msg) => ({ ok: true, msg }), bad = (msg) => ({ ok: false, msg });
@@ -460,8 +461,7 @@ export function dispatch(s, a) {
                 return bad(`Your bank will lend at most ${money(max)} more.`);
             const rate = 0.07 + (s.difficulty === "hard" ? 0.02 : 0) - s.rep / 2000;
             s.loans.push({ id: nid(s, "loan"), principal: amt, left: amt, rate, day: s.day });
-            s.cash += amt;
-            s.ledger.unshift({ day: s.day, kind: "loan", text: "Bank loan drawn", amount: amt });
+            cashIn(s, "loan", "Bank loan drawn", amt);
             return ok(`Loan approved at ${(rate * 100).toFixed(1)}%. Repaid in 12 monthly instalments.`);
         }
         case "repay": {
@@ -517,7 +517,9 @@ function sendQuote(s, a, rng) {
     if (a.keepPrices && prev) { /* keep the discounted unit prices from a customer-accepted ask */ }
     const promise = Math.max(opt.promiseDays ?? 0, land.eta + 2);
     const round = prev ? prev.round + 1 : 1;
-    const cq = { termsDays: opt.termsDays ?? 30, promiseDays: a.promiseDays ?? promise, warrantyM: opt.warrantyM ?? 12, partialOk: !!opt.partialOk, sentDay: s.day, replyDay: s.day + Math.max(1, rng.int(2, 5) - (s.staff.sales > 2 ? 1 : 0)), round, status: "sent", clarified: prev?.clarified ?? false, total: lineUnits.reduce((t, u, i) => t + u * r.lines[i].qty, 0), lineUnits };
+    const ccur = DB.clientById[r.client] && COUNTRY[DB.clientById[r.client].country]?.cur;
+    const qcur = opt.cur && opt.cur !== "USD" && opt.cur === ccur && s.fx[opt.cur] ? opt.cur : undefined;
+    const cq = { cur: qcur, fxAt: qcur ? s.fx[qcur] : undefined, termsDays: opt.termsDays ?? 30, promiseDays: a.promiseDays ?? promise, warrantyM: opt.warrantyM ?? 12, partialOk: !!opt.partialOk, sentDay: s.day, replyDay: s.day + Math.max(1, rng.int(2, 5) - (s.staff.sales > 2 ? 1 : 0)), round, status: "sent", clarified: prev?.clarified ?? false, total: lineUnits.reduce((t, u, i) => t + u * r.lines[i].qty, 0), lineUnits };
     r.cq = cq;
     r.status = "quoted";
     return ok(`Quotation ${round > 1 ? "revision " + round + " " : ""}sent. The customer will reply in a few days.`);

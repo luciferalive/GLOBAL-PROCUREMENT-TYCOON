@@ -4,6 +4,7 @@ import { DB } from "../data/db.js";
 import { Rng } from "./rng.js";
 import { dutyRate, MONTHLY, toC } from "./pricing.js";
 import { decide } from "./sales.js";
+import { supTier } from "./pricing.js";
 import { RIVALS } from "../data/rivals.js";
 import { checkMissions } from "./missions.js";
 export const SAVE_VERSION = 1;
@@ -51,10 +52,10 @@ export const nid = (s, k) => (s.counters[k] = (s.counters[k] ?? 0) + 1);
 export function news(s, text, kind = "info") { s.news.unshift({ day: s.day, text, kind }); if (s.news.length > 120)
     s.news.length = 120; }
 export function plOf(s, day = s.day) { const k = monthKey(day); return (s.pl[k] ??= emptyPl()); }
-export function cashIn(s, kind, text, amt) { s.cash += amt; s.ledger.unshift({ day: s.day, kind, text, amount: amt }); if (s.ledger.length > 400)
-    s.ledger.length = 400; }
-export function cashOut(s, kind, text, amt) { s.cash -= amt; s.ledger.unshift({ day: s.day, kind, text, amount: -amt }); if (s.ledger.length > 400)
-    s.ledger.length = 400; }
+export function cashIn(s, kind, text, amt) { s.cash += amt; s.ledger.unshift({ id: nid(s, "led"), day: s.day, kind, text, amount: amt }); if (s.ledger.length > 2000)
+    s.ledger.length = 2000; }
+export function cashOut(s, kind, text, amt) { s.cash -= amt; s.ledger.unshift({ id: nid(s, "led"), day: s.day, kind, text, amount: -amt }); if (s.ledger.length > 2000)
+    s.ledger.length = 2000; }
 const partsByCat = {};
 for (const p of DB.parts)
     (partsByCat[p.cat] ??= []).push(p);
@@ -233,7 +234,16 @@ export function stepDay(s) {
     for (const i of s.invoices)
         if (!i.paid && i.payDay <= s.day) {
             i.paid = true;
-            cashIn(s, "customer", `Payment received ${i.no} from ${DB.clientById[i.client].name}`, i.amount);
+            let got = i.amount, fxNote = "";
+            if (i.cur && i.fc && s.fx[i.cur]) {
+                got = Math.round(i.fc / s.fx[i.cur]);
+                const d = got - i.amount;
+                plOf(s).other -= d;
+                fxNote = ` · paid in ${i.cur} (FX ${d >= 0 ? "gain" : "loss"} ${money(Math.abs(d))})`;
+                if (Math.abs(d) >= 5000)
+                    news(s, `FX ${d >= 0 ? "gain" : "loss"} of ${money(Math.abs(d))} on ${i.no} (${i.cur}).`, d >= 0 ? "good" : "warn");
+            }
+            cashIn(s, "customer", `Payment received ${i.no} from ${DB.clientById[i.client].name}${fxNote}`, got);
             s.stats.revenue += i.amount;
             const k = DB.clientById[i.client];
             s.rel[k.id] = Math.min(100, (s.rel[k.id] ?? 20) + 1);
@@ -478,7 +488,7 @@ export function createSo(s, r, only) {
     const cq = r.cq;
     const id = nid(s, "so");
     const lines = r.lines.map((l, i) => ({ l, i })).filter((x) => !only || only.includes(x.i));
-    const so = { id, no: `SO-${String(5000 + id)}`, rfq: r.id, client: r.client, day: s.day, needBy: s.day + r.needDays, termsDays: cq.termsDays, warrantyM: cq.warrantyM, lines: lines.map(({ l, i }) => ({ partId: l.partId, qty: l.qty, unit: cq.lineUnits[i], delivered: 0, rfqLine: i })), status: "open", deliveryDay: null, purchased: false };
+    const so = { id, no: `SO-${String(5000 + id)}`, rfq: r.id, client: r.client, day: s.day, needBy: s.day + r.needDays, termsDays: cq.termsDays, warrantyM: cq.warrantyM, cur: cq.cur, fxAt: cq.fxAt, lines: lines.map(({ l, i }) => ({ partId: l.partId, qty: l.qty, unit: cq.lineUnits[i], delivered: 0, rfqLine: i })), status: "open", deliveryDay: null, purchased: false };
     for (const { l, i } of lines)
         for (const a of l.alloc)
             if (a.stockLot) {
@@ -617,6 +627,17 @@ function receiveGoods(s, po, sh, rng) {
     sh.status = "delivered";
     po.status = "received";
     s.flags.received = true;
+    {
+        const st = ((s.supStats ??= {})[po.supplier] ??= { orders: 0, value: 0, bad: 0 });
+        const before = supTier(s, po.supplier).id;
+        st.orders++;
+        st.value += po.value;
+        if (po.wrongItem)
+            st.bad++;
+        const after = supTier(s, po.supplier);
+        if (after.id !== before)
+            news(s, `${DB.supplierById[po.supplier].name} is now a ${after.name} supplier: ${Math.round(after.disc * 100)}% better prices, ${Math.round((1 - after.lead) * 100)}% faster${after.terms ? ", better payment terms" : ""}.`, "good");
+    }
     const extra = sh.freight + (sh.insured ? 0 : 0) + sh.duty + sh.clearance + sh.local, valueSum = po.lines.reduce((a, l) => a + l.qty * l.unit, 0) || 1;
     const sup = DB.supplierById[po.supplier];
     if (!s.stats.countries.includes(sup.country))
@@ -700,7 +721,7 @@ export function completeDelivery(s, so, rng) {
         amount = Math.round(amount * 0.97);
     const id = nid(s, "inv");
     const delay = Math.round((1 - c.payRel) * 40 * rng.range(0.3, 1.2)) - (s.staff.finance > 0 ? 3 : 0) + (s.mods.payDelayUntil > s.day ? 5 : 0);
-    const inv = { id, no: `INV-${String(7000 + id)}`, so: so.id, client: so.client, amount, issue: s.day, due: s.day + so.termsDays, payDay: s.day + so.termsDays + Math.max(0, delay), paid: false, cogs };
+    const inv = { cur: so.cur, fc: so.cur && so.fxAt ? Math.round(amount * so.fxAt) : undefined, id, no: `INV-${String(7000 + id)}`, so: so.id, client: so.client, amount, issue: s.day, due: s.day + so.termsDays, payDay: s.day + so.termsDays + Math.max(0, delay), paid: false, cogs };
     s.invoices.push(inv);
     plOf(s).rev += amount;
     plOf(s).cogs += cogs;

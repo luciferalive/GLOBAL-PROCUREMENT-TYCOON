@@ -23,3 +23,29 @@ ${bar(stockUsed(s), whCap(s))}
 <div class="cards">${SITES.map((x) => { const on = open.includes(x.id); return `<div class="card ${on ? "ok" : ""}"><div class="big-i">${on ? "🏭" : "🏗"}</div><b>${flag(x.country)} ${esc(x.city)}</b><p class="sm">${esc(x.note)}</p><p class="sm">+${x.cap} m³ · rent ${money(toC(x.rent))}/mo · setup ${money(toC(x.setup))}<br>Serves: ${x.regions.join(", ")} · <b>−${x.bonus} days</b> transit</p>${on ? btn("Close site", { type: "closeSite", id: x.id }, "ghost sm") + " " + pill("open", "ok") : btn("Open warehouse", { type: "openSite", id: x.id }, "pri sm")}</div>`; }).join("")}</div>
 <p class="sm">Expanding the Doha warehouse itself is on the Warehouse page.</p>`;
     } };
+import { dateStr } from "../engine/core.js";
+import { ui } from "./state.js";
+const KIND = { customer: "Customer payment", supplier: "Supplier payment", freight: "Freight", customs: "Customs & duty", bank: "Bank charges", loan: "Loan", salaries: "Salaries", rent: "Rent", storage: "Storage", tax: "Tax", industry: "Industry unlock", admin: "Admin / certificates", mission: "Mission reward", claim: "Claims" };
+export const ledger = { id: "ledger", title: "Cash Ledger", icon: "💵", group: "Company", render(s) {
+        const kind = ui.q.lk ?? "", dir = ui.q.ld ?? "";
+        const run = [];
+        let bal = s.cash;
+        for (const l of s.ledger) {
+            run.push(bal);
+            bal -= l.amount;
+        }
+        const rows = s.ledger.map((l, i) => ({ l, bal: run[i] })).filter(({ l }) => (!kind || l.kind === kind) && (!dir || (dir === "in" ? l.amount > 0 : l.amount < 0)));
+        const win = s.ledger.filter((l) => l.day > s.day - 30);
+        const inn = win.filter((l) => l.amount > 0).reduce((a, l) => a + l.amount, 0), out = win.filter((l) => l.amount < 0).reduce((a, l) => a - l.amount, 0);
+        const byKind = {};
+        for (const l of win)
+            byKind[l.kind] = (byKind[l.kind] ?? 0) + l.amount;
+        const kinds = Object.entries(byKind).sort((a, b) => a[1] - b[1]);
+        const mx = Math.max(1, ...kinds.map(([, v]) => Math.abs(v)));
+        const dueIn = s.invoices.filter((i) => !i.paid).reduce((a, i) => a + i.amount, 0), dueOut = s.payables.filter((p) => !p.paid).reduce((a, p) => a + p.amount, 0);
+        return `<div class="ph"><h1>Cash Ledger</h1><p class="sub">Every cent that enters or leaves your bank account, with the running balance after each entry. If your cash moves, the reason is on this page.</p></div>
+<div class="kgrid">${kpi("Cash now", money(s.cash), "", s.cash < 0 ? "bad" : "good", "💵")}${kpi("Money in (30 days)", money(inn), "", "good", "⬇")}${kpi("Money out (30 days)", money(out), "", "warn", "⬆")}${kpi("Net (30 days)", money(inn - out), "", inn - out >= 0 ? "good" : "bad", "⚖")}${kpi("Still to collect", money(dueIn), "unpaid customer invoices", "", "🧾")}${kpi("Still to pay", money(dueOut), "unpaid supplier / freight bills", dueOut ? "warn" : "", "📤")}</div>
+<div class="panel"><h2>Where the money went (last 30 days)</h2>${kinds.map(([k, v]) => `<div class="lbar"><span>${esc(KIND[k] ?? k)}</span><div class="lb"><i class="${v >= 0 ? "in" : "out"}" style="width:${Math.abs(v) / mx * 100}%"></i></div><b class="${v >= 0 ? "good" : "bad"}">${v >= 0 ? "+" : "-"}${money(Math.abs(v))}</b></div>`).join("") || '<p class="empty">No money movement yet.</p>'}</div>
+<div class="filters"><select data-ui="lk"><option value="">All types</option>${Object.entries(KIND).map(([k, v]) => `<option value="${k}" ${kind === k ? "selected" : ""}>${v}</option>`).join("")}</select><select data-ui="ld"><option value="">In and out</option><option value="in" ${dir === "in" ? "selected" : ""}>Money in only</option><option value="out" ${dir === "out" ? "selected" : ""}>Money out only</option></select><span class="sm">${rows.length} entries (latest 2,000 kept)</span></div>
+${table(["Day", "Date", "Type", "What happened", "Amount", "Balance after"], rows.slice(0, 120).map(({ l, bal: b }) => [String(l.day), dateStr(l.day), pill(KIND[l.kind] ?? l.kind, l.amount > 0 ? "ok" : "info"), esc(l.text), `<b class="${l.amount > 0 ? "good" : "bad"}">${l.amount > 0 ? "+" : "-"}${money(Math.abs(l.amount))}</b>`, money(b)]))}`;
+    } };

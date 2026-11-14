@@ -1,6 +1,8 @@
 import { DB, PERSONA_LABEL } from "../data/db.js";
 import { landedCost } from "./pricing.js";
 import { RIVALS } from "../data/rivals.js";
+import { RULES } from "../data/rules.js";
+import { COUNTRY } from "../data/countries.js";
 const CURVE = [[0.9, 0.98], [1.0, 0.82], [1.05, 0.5], [1.1, 0.22], [1.2, 0.06], [1.35, 0]];
 export const pAcceptAt = (qe) => { if (qe <= CURVE[0][0])
     return CURVE[0][1]; for (let i = 1; i < CURVE.length; i++) {
@@ -15,6 +17,15 @@ export function assess(s, r) {
     const rel = s.rel[c.id] ?? 20;
     const why = [];
     let adj = 0 - 0.015 * (s.staff.sales - 1) - (s.rep - 30) / 1000 - (c.persona === "relationship" ? (rel / 100) * 0.08 : (rel / 100) * 0.03);
+    const rule = RULES[c.industry];
+    if (rule?.priceAdj) {
+        adj += rule.priceAdj;
+        why.push("industry is price sensitive");
+    }
+    if (cq.cur && cq.cur === COUNTRY[c.country]?.cur) {
+        adj -= 0.01;
+        why.push(`prefers a quotation in ${cq.cur}`);
+    }
     if (c.persona === "price") {
         adj += 0.04;
         why.push("price-focused: hard on price");
@@ -31,7 +42,7 @@ export function assess(s, r) {
         adj -= 0.015;
     const late = cq.promiseDays - r.needDays;
     if (late > 0)
-        adj += Math.min(0.1, late * 0.006) * (c.persona === "delivery" || c.persona === "emergency" ? 2 : 1);
+        adj += Math.min(0.1, late * 0.006) * (c.persona === "delivery" || c.persona === "emergency" ? 2 : 1) * (rule?.lateX ?? 1);
     if (cq.promiseDays < r.needDays && (c.persona === "delivery" || c.persona === "emergency")) {
         adj -= 0.03;
         why.push("fast delivery valued");
@@ -44,7 +55,8 @@ export function decide(s, r, rng) {
     const a = assess(s, r);
     const land = landedCost(s, r);
     const altUsed = r.lines.some((_, i) => land.byLine[i]?.alt), nonOem = r.lines.some((_, i) => !land.byLine[i]?.oemSource);
-    const reqCert = r.lines.some((l) => l.certs.length > 0), docs = r.lines.some((_, i) => land.byLine[i]?.docs !== "full");
+    const rule = RULES[c.industry];
+    const reqCert = rule?.fullDocs || r.lines.some((l) => l.certs.length > 0), docs = r.lines.some((_, i) => land.byLine[i]?.docs !== "full");
     if (cq.round >= 3)
         return rng.chance(a.p) ? { type: "accept", msg: "Final offer accepted." } : { type: "reject", msg: "We could not agree on commercial terms after several rounds." };
     if (!r.urgent && rng.chance(0.015))
@@ -59,6 +71,10 @@ export function decide(s, r, rng) {
             return { type: "reject", msg: `The order went to ${rv.name}, whose offer was about ${Math.max(2, gap)}% below yours.`, rival: rv.id };
         }
     }
+    if (rule?.authOnly && nonOem)
+        return { type: "revise", msg: "Our industry rules allow only the OEM or authorized distributors as the source. Please re-quote from an authorized source." };
+    if (rule?.noAlt && altUsed)
+        return { type: "revise", msg: "Alternative or generic parts are not permitted for this industry. Please quote the specified item." };
     if (c.persona === "oemonly" && nonOem)
         return { type: "revise", msg: "We only buy from the OEM or its authorized distributors. Please re-quote from an authorized source." };
     if (altUsed) {
@@ -68,7 +84,7 @@ export function decide(s, r, rng) {
     }
     if ((c.persona === "cert" || reqCert) && docs && !cq.clarified) {
         const none = r.lines.some((_, i) => land.byLine[i]?.docs === "none");
-        if (none && c.persona === "cert")
+        if (none && (c.persona === "cert" || rule?.fullDocs))
             return { type: "reject", msg: "Your source cannot provide the required certification and documentation." };
         return { type: "clarify", msg: "Please confirm the technical specification and certificates (datasheets, conformity, origin)." };
     }

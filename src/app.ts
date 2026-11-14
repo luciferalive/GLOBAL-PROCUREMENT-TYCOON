@@ -11,16 +11,22 @@ import { docHtml } from "./ui/docs.js";
 import type { Page } from "./ui/pages1.js";
 import { dashboard, partLine, rfqs } from "./ui/pages1.js";
 import { finance, orders, shipments, warehouse } from "./ui/pages2.js";
-import { banking, network } from "./ui/pages6.js";
+import { banking, network, ledger } from "./ui/pages6.js";
 import { achievements, reports } from "./ui/pages5.js";
 import { customs, competitors, market } from "./ui/pages4.js";
 import { company, customers, documents, industries, logisticsPage, newsPage, settings, suppliers, training } from "./ui/pages3.js";
 
-const PAGES: Page[] = [dashboard, rfqs, orders, shipments, customs, market, warehouse, network, suppliers, competitors, customers, logisticsPage, industries, company, finance, banking, reports, achievements, documents, training, newsPage, settings];
+const PAGES: Page[] = [dashboard, rfqs, orders, shipments, customs, market, warehouse, network, suppliers, competitors, customers, logisticsPage, industries, company, finance, ledger, banking, reports, achievements, documents, training, newsPage, settings];
 const GROUPS = ["Operations", "Network", "Company", "Help"];
 let S: GameState = createGame();
 S.paused = true;
-let autoPause = true;
+let autoPause = true, lastLed = 0, chip: { amt: number; text: string; until: number } | null = null;
+function watchCash() {
+  const fresh = S.ledger.filter((l) => (l.id ?? 0) > lastLed); if (S.ledger[0]?.id) lastLed = Math.max(lastLed, S.ledger[0].id!); if (!fresh.length) return;
+  const net = fresh.reduce((a, l) => a + l.amount, 0); const big = fresh.filter((l) => l.kind === "customer" || l.kind === "loan" || l.kind === "claim" || l.kind === "mission");
+  chip = { amt: net, text: fresh.length === 1 ? fresh[0].text : `${fresh.length} transactions`, until: Date.now() + 9000 }; setTimeout(render, 9100);
+  for (const l of big) if (l.amount >= 50000) toast(`💰 ${money(l.amount)} received: ${l.text}`);
+}
 let toastMsg = "", toastBad = false, toastT = 0;
 const root = $("#app")!;
 
@@ -47,11 +53,11 @@ function applyUi(a: any) {
   if (a.print) { const w = window.open("", "_blank"); if (w) { w.document.write(`<html><head><title>Document</title><link rel="stylesheet" href="style.css"></head><body class="printbody">${docHtml(S, a.print)}</body></html>`); w.document.close(); setTimeout(() => w.print(), 400); } }
   if (a.saveDoc) { const blob = new Blob([`<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body class="printbody">${docHtml(S, a.saveDoc)}</body></html>`], { type: "text/html" }); const l = document.createElement("a"); l.href = URL.createObjectURL(blob); l.download = a.saveDoc.replace(":", "-") + ".html"; l.click(); }
   if (a.save) putSave(a.save).then((ok) => { toast(ok ? `Saved to slot ${a.save}.` : "Could not save (browser storage blocked).", !ok); render(); slotList(); });
-  if (a.load) getSave(a.load).then((v) => { if (!v) return toast("That slot is empty.", true); S = v.state; S.paused = true; ui.rfq = null; ui.so = null; ui.modal = null; toast(`Loaded ${a.load === "auto" ? "autosave" : "slot " + a.load}.`); render(); });
+  if (a.load) getSave(a.load).then((v) => { if (!v) return toast("That slot is empty.", true); S = v.state; S.paused = true; lastLed = S.ledger[0]?.id ?? 0; chip = null; ui.rfq = null; ui.so = null; ui.modal = null; toast(`Loaded ${a.load === "auto" ? "autosave" : "slot " + a.load}.`); render(); });
 }
 function run(a: any) {
   if (a.type === "ui") { applyUi(a); render(); return; }
-  if (a.type === "newgame") { S = createGame({ name: a.name || "Gulf Star Trading", difficulty: a.difficulty }); S.paused = true; ui.page = "dashboard"; ui.rfq = null; ui.so = null; ui.modal = null; ui.guide = true; toast("New game started. Follow the training banner!"); render(); return; }
+  if (a.type === "newgame") { S = createGame({ name: a.name || "Gulf Star Trading", difficulty: a.difficulty }); S.paused = true; lastLed = 0; chip = null; ui.page = "dashboard"; ui.rfq = null; ui.so = null; ui.modal = null; ui.guide = true; toast("New game started. Follow the training banner!"); render(); return; }
   const r = dispatch(S, a);
   if (a.ui) applyUi({ type: "ui", ...a.ui });
   if (a.type === "requestQuotes" || a.type === "autoQuotes" || a.type === "negotiateQuote" || a.type === "negotiateTerms") ui.modal = null;
@@ -105,6 +111,7 @@ function coach(): string {
 }
 let rendering = false, again = false;
 function render() {
+  watchCash();
   if (rendering) { again = true; return; } rendering = true;
   try { draw(); } finally { rendering = false; } if (again) { again = false; render(); }
 }
@@ -114,7 +121,7 @@ function draw() {
   const nav = GROUPS.map((g) => `<div class="ng">${g}</div>${PAGES.filter((p) => p.group === g).map((p) => `<button class="ni ${p.id === ui.page ? "on" : ""}" data-act='${esc(JSON.stringify({ type: "ui", page: p.id, rfq: p.id === "rfqs" ? null : undefined, so: p.id === "orders" ? null : undefined }))}'><i>${p.icon}</i><span>${p.title}</span>${badge(p.id) ? `<em>${badge(p.id)}</em>` : ""}</button>`).join("")}`).join("");
   const sp = (n: number, l: string) => btn(l, { type: "setSpeed", value: n }, !s.paused && s.speed === n ? "on sm" : "sm");
   const html = `<div class="shell"><aside><div class="brand"><div class="logo">🌐</div><div><b>Global Procurement</b><span>TYCOON</span></div></div><nav>${nav}</nav><div class="aside-foot">Simulated data only</div></aside>
-<div class="main"><header class="top"><div class="co"><b>${esc(s.name)}</b><span>${dateStr(s.day)} · day ${s.day}</span></div><div class="hk"><label>Cash</label><b class="${s.cash < 0 ? "bad" : ""}">${money(s.cash)}</b></div><div class="hk"><label>Net worth</label><b>${money(netWorth(s).total)}</b></div><div class="hk"><label>Reputation</label><b>${Math.round(s.rep)}</b></div>
+<div class="main"><header class="top"><div class="co"><b>${esc(s.name)}</b><span>${dateStr(s.day)} · day ${s.day}</span></div><div class="hk cashk" data-act='{"type":"ui","page":"ledger"}' title="Open the cash ledger"><label>Cash (click for ledger)</label><b class="${s.cash < 0 ? "bad" : ""}">${money(s.cash)}</b>${chip && chip.until > Date.now() ? `<span class="cashchip ${chip.amt >= 0 ? "in" : "out"}" title="${esc(chip.text)}">${chip.amt >= 0 ? "+" : "-"}${money(Math.abs(chip.amt))}</span>` : ""}</div><div class="hk"><label>Net worth</label><b>${money(netWorth(s).total)}</b></div><div class="hk"><label>Reputation</label><b>${Math.round(s.rep)}</b></div>
 <div class="clock"><label class="ap" title="Pauses the clock whenever a new RFQ arrives"><input type="checkbox" data-ap ${autoPause ? "checked" : ""}> Pause on new RFQ</label>${btn(s.paused ? "▶ Paused" : "⏸ Pause", { type: "setPaused", value: !s.paused }, s.paused ? "warnb sm" : "sm")}${sp(1, "1×")}${sp(2, "2×")}${sp(3, "3×")}${btn("+1 day", { type: "advance", days: 1 }, "sm")}${btn("+7 days", { type: "advance", days: 7 }, "sm")}</div></header>
 ${coach()}${s.over ? `<div class="gameover">GAME OVER: ${esc(s.over)} ${btn("New game", { type: "ui", modal: { kind: "newgame" } }, "pri sm")}</div>` : ""}
 <main id="page">${pg.render(s)}</main></div>${modal()}${toastMsg ? `<div class="toast ${toastBad ? "bad" : ""}">${esc(toastMsg)}</div>` : ""}</div>`;

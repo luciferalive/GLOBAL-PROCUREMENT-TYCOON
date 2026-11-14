@@ -5,6 +5,7 @@ import type { Cents, GameState, Invoice, Lot, Payable, Pl, Po, Reg, Rfq, Shipmen
 import { Rng } from "./rng.js";
 import { dutyRate, MONTHLY, toC } from "./pricing.js";
 import { decide } from "./sales.js";
+import { supTier } from "./pricing.js";
 import { RIVALS } from "../data/rivals.js";
 import { checkMissions } from "./missions.js";
 
@@ -40,8 +41,8 @@ export function createGame(o: { name?: string; difficulty?: "easy" | "normal" | 
 export const nid = (s: GameState, k: string) => (s.counters[k] = (s.counters[k] ?? 0) + 1);
 export function news(s: GameState, text: string, kind: "info" | "good" | "bad" | "warn" = "info") { s.news.unshift({ day: s.day, text, kind }); if (s.news.length > 120) s.news.length = 120; }
 export function plOf(s: GameState, day = s.day): Pl { const k = monthKey(day); return (s.pl[k] ??= emptyPl()); }
-export function cashIn(s: GameState, kind: string, text: string, amt: Cents) { s.cash += amt; s.ledger.unshift({ day: s.day, kind, text, amount: amt }); if (s.ledger.length > 400) s.ledger.length = 400; }
-export function cashOut(s: GameState, kind: string, text: string, amt: Cents) { s.cash -= amt; s.ledger.unshift({ day: s.day, kind, text, amount: -amt }); if (s.ledger.length > 400) s.ledger.length = 400; }
+export function cashIn(s: GameState, kind: string, text: string, amt: Cents) { s.cash += amt; s.ledger.unshift({ id: nid(s, "led"), day: s.day, kind, text, amount: amt }); if (s.ledger.length > 2000) s.ledger.length = 2000; }
+export function cashOut(s: GameState, kind: string, text: string, amt: Cents) { s.cash -= amt; s.ledger.unshift({ id: nid(s, "led"), day: s.day, kind, text, amount: -amt }); if (s.ledger.length > 2000) s.ledger.length = 2000; }
 
 const partsByCat: Record<string, Part[]> = {}; for (const p of DB.parts) (partsByCat[p.cat] ??= []).push(p);
 export const isOpen = (r: Rfq) => ["new", "sourcing", "quoted", "negotiating"].includes(r.status);
@@ -121,7 +122,9 @@ export function stepDay(s: GameState) {
   for (const so of s.sos) if (so.status === "delivering" && so.deliveryDay !== null && so.deliveryDay <= s.day) completeDelivery(s, so, rng);
   for (const so of s.sos) if ((so.status === "open") && s.day > so.needBy + 20) { so.status = "cancelled"; const r = s.rfqs.find((x) => x.id === so.rfq); if (r) r.status = "completed"; s.rep = Math.max(0, s.rep - 4); s.stats.late++; for (const l of s.lots) if (l.so === so.id) l.so = null; news(s, `${so.no} cancelled by ${DB.clientById[so.client].name}: delivery more than 20 days late. Reputation -4. Reserved stock released.`, "bad"); }
   // 10. money in / out
-  for (const i of s.invoices) if (!i.paid && i.payDay <= s.day) { i.paid = true; cashIn(s, "customer", `Payment received ${i.no} from ${DB.clientById[i.client].name}`, i.amount); s.stats.revenue += i.amount; const k = DB.clientById[i.client]; s.rel[k.id] = Math.min(100, (s.rel[k.id] ?? 20) + 1); s.flags.paid = true; }
+  for (const i of s.invoices) if (!i.paid && i.payDay <= s.day) { i.paid = true; let got = i.amount, fxNote = "";
+    if (i.cur && i.fc && s.fx[i.cur]) { got = Math.round(i.fc / s.fx[i.cur]); const d = got - i.amount; plOf(s).other -= d; fxNote = ` · paid in ${i.cur} (FX ${d >= 0 ? "gain" : "loss"} ${money(Math.abs(d))})`; if (Math.abs(d) >= 5000) news(s, `FX ${d >= 0 ? "gain" : "loss"} of ${money(Math.abs(d))} on ${i.no} (${i.cur}).`, d >= 0 ? "good" : "warn"); }
+    cashIn(s, "customer", `Payment received ${i.no} from ${DB.clientById[i.client].name}${fxNote}`, got); s.stats.revenue += i.amount; const k = DB.clientById[i.client]; s.rel[k.id] = Math.min(100, (s.rel[k.id] ?? 20) + 1); s.flags.paid = true; }
   for (const p of s.payables) if (!p.paid && p.due <= s.day) { p.paid = true; if (p.kind === "claim") cashIn(s, "claim", `Claim recovered: ${p.ref}`, p.amount); else cashOut(s, p.kind, `Paid ${p.to}: ${p.ref}`, p.amount); }
   // 11. costs
   const dailyRent = Math.round(toC(whRentMonth(s)) / 30); cashOut(s, "rent", "Warehouse rent (daily share)", dailyRent); plOf(s).rent += dailyRent;
@@ -172,7 +175,7 @@ export function customerReply(s: GameState, r: Rfq, rng: Rng) {
 
 export function createSo(s: GameState, r: Rfq, only?: number[]) {
   const cq = r.cq!; const id = nid(s, "so"); const lines = r.lines.map((l, i) => ({ l, i })).filter((x) => !only || only.includes(x.i));
-  const so: So = { id, no: `SO-${String(5000 + id)}`, rfq: r.id, client: r.client, day: s.day, needBy: s.day + r.needDays, termsDays: cq.termsDays, warrantyM: cq.warrantyM, lines: lines.map(({ l, i }) => ({ partId: l.partId, qty: l.qty, unit: cq.lineUnits[i], delivered: 0, rfqLine: i })), status: "open", deliveryDay: null, purchased: false };
+  const so: So = { id, no: `SO-${String(5000 + id)}`, rfq: r.id, client: r.client, day: s.day, needBy: s.day + r.needDays, termsDays: cq.termsDays, warrantyM: cq.warrantyM, cur: cq.cur, fxAt: cq.fxAt, lines: lines.map(({ l, i }) => ({ partId: l.partId, qty: l.qty, unit: cq.lineUnits[i], delivered: 0, rfqLine: i })), status: "open", deliveryDay: null, purchased: false };
   for (const { l, i } of lines) for (const a of l.alloc) if (a.stockLot) { const lot = s.lots.find((x) => x.id === a.stockLot); if (lot && lot.qty >= a.qty) { if (lot.qty > a.qty) { const nl = { ...lot, id: `LOT-${nid(s, "lot")}`, qty: a.qty, so: id, soLine: so.lines.findIndex((x) => x.rfqLine === i) }; lot.qty -= a.qty; s.lots.push(nl); } else { lot.so = id; lot.soLine = so.lines.findIndex((x) => x.rfqLine === i); } } }
   if (only) for (let i = 0; i < r.lines.length; i++) if (!only.includes(i)) r.lines[i].alloc = r.lines[i].alloc.filter((a) => !a.quote);
   s.sos.push(so); r.so = id; r.status = "awarded"; s.stats.won++; s.rep = Math.min(100, s.rep + 1.2); s.rel[r.client] = Math.min(100, (s.rel[r.client] ?? 20) + 4); s.flags.so_created = true;
@@ -221,6 +224,7 @@ function logistics(s: GameState, rng: Rng) {
 }
 function receiveGoods(s: GameState, po: Po, sh: Shipment, rng: Rng) {
   sh.status = "delivered"; po.status = "received"; s.flags.received = true;
+  { const st = ((s.supStats ??= {})[po.supplier] ??= { orders: 0, value: 0, bad: 0 }); const before = supTier(s, po.supplier).id; st.orders++; st.value += po.value; if (po.wrongItem) st.bad++; const after = supTier(s, po.supplier); if (after.id !== before) news(s, `${DB.supplierById[po.supplier].name} is now a ${after.name} supplier: ${Math.round(after.disc * 100)}% better prices, ${Math.round((1 - after.lead) * 100)}% faster${after.terms ? ", better payment terms" : ""}.`, "good"); }
   const extra = sh.freight + (sh.insured ? 0 : 0) + sh.duty + sh.clearance + sh.local, valueSum = po.lines.reduce((a, l) => a + l.qty * l.unit, 0) || 1;
   const sup = DB.supplierById[po.supplier]; if (!s.stats.countries.includes(sup.country)) s.stats.countries.push(sup.country);
   for (const l of po.lines) {
@@ -257,7 +261,7 @@ export function completeDelivery(s: GameState, so: So, rng: Rng) {
   const c = DB.clientById[so.client]; const late = s.day > so.needBy;
   if (late && c.persona === "delivery") amount = Math.round(amount * 0.97);
   const id = nid(s, "inv"); const delay = Math.round((1 - c.payRel) * 40 * rng.range(0.3, 1.2)) - (s.staff.finance > 0 ? 3 : 0) + (s.mods.payDelayUntil > s.day ? 5 : 0);
-  const inv: Invoice = { id, no: `INV-${String(7000 + id)}`, so: so.id, client: so.client, amount, issue: s.day, due: s.day + so.termsDays, payDay: s.day + so.termsDays + Math.max(0, delay), paid: false, cogs };
+  const inv: Invoice = { cur: so.cur, fc: so.cur && so.fxAt ? Math.round(amount * so.fxAt) : undefined, id, no: `INV-${String(7000 + id)}`, so: so.id, client: so.client, amount, issue: s.day, due: s.day + so.termsDays, payDay: s.day + so.termsDays + Math.max(0, delay), paid: false, cogs };
   s.invoices.push(inv); plOf(s).rev += amount; plOf(s).cogs += cogs; s.stats.delivered++;
   const complete = so.lines.every((l) => l.delivered >= l.qty);
   if (complete) { so.status = "closed"; const r = s.rfqs.find((x) => x.id === so.rfq); if (r) r.status = "completed"; } else so.status = "open";

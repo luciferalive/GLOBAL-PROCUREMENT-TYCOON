@@ -5,6 +5,7 @@ import type { Action, GameState, Po, Reg, Result, Rfq, Shipment } from "./types.
 import { SITE, SITES } from "../data/sites.js";
 import { exportOpt } from "./pricing.js";
 import { LC_STEP, lcOf, stockUsed } from "./core.js";
+import { cashIn } from "./core.js";
 import { CERT_COST, R, cashOut, createSo, inspectLot, isOpen, money, netWorth, news, nid, plOf, registrationCheck, stepDay, whCap, whRentMonth, WH_STEP_RENT } from "./core.js";
 import { FREIGHT_INCLUDED, MONTHLY, eligible, freightQuote, landedCost, makeQuote, supplierStaffDelay, toC } from "./pricing.js";
 
@@ -146,7 +147,7 @@ export function dispatch(s: GameState, a: Action): Result {
     case "fire": { const k = a.role as keyof typeof MONTHLY; if (!(k in MONTHLY) || s.staff[k] <= 0) return bad("Nobody to release."); s.staff[k]--; return ok(); }
     case "borrow": {
       const max = Math.max(0, toC(40_000 + s.rep * 2500) - s.loans.reduce((t, l) => t + l.left, 0)); const amt = toC(Math.max(1000, +a.amount || 0)); if (amt > max) return bad(`Your bank will lend at most ${money(max)} more.`);
-      const rate = 0.07 + (s.difficulty === "hard" ? 0.02 : 0) - s.rep / 2000; s.loans.push({ id: nid(s, "loan"), principal: amt, left: amt, rate, day: s.day }); s.cash += amt; s.ledger.unshift({ day: s.day, kind: "loan", text: "Bank loan drawn", amount: amt }); return ok(`Loan approved at ${(rate * 100).toFixed(1)}%. Repaid in 12 monthly instalments.`);
+      const rate = 0.07 + (s.difficulty === "hard" ? 0.02 : 0) - s.rep / 2000; s.loans.push({ id: nid(s, "loan"), principal: amt, left: amt, rate, day: s.day }); cashIn(s, "loan", "Bank loan drawn", amt); return ok(`Loan approved at ${(rate * 100).toFixed(1)}%. Repaid in 12 monthly instalments.`);
     }
     case "repay": { const l = s.loans.find((x) => x.id === a.id); if (!l) return bad("No loan."); if (s.cash < l.left) return bad("Not enough cash to repay in full."); cashOut(s, "loan", "Loan repaid early", l.left); s.loans = s.loans.filter((x) => x !== l); return ok(); }
     case "expandWh": { if (s.whSize >= 6) return bad("Largest warehouse already."); const dep = toC(5000); if (s.cash < dep) return bad("Not enough cash for the fit-out deposit ($5,000)."); cashOut(s, "rent", "Warehouse expansion fit-out", dep); plOf(s).other += dep; s.whSize++; return ok(`Capacity now ${whCap(s)} m3. Rent rises by ${money(toC(WH_STEP_RENT))} per month.`); }
@@ -165,7 +166,8 @@ function sendQuote(s: GameState, a: Action, rng: ReturnType<typeof R>): Result {
   if (a.keepPrices && prev) { /* keep the discounted unit prices from a customer-accepted ask */ }
   const promise = Math.max(opt.promiseDays ?? 0, land.eta + 2);
   const round = prev ? prev.round + 1 : 1;
-  const cq = { termsDays: opt.termsDays ?? 30, promiseDays: a.promiseDays ?? promise, warrantyM: opt.warrantyM ?? 12, partialOk: !!opt.partialOk, sentDay: s.day, replyDay: s.day + Math.max(1, rng.int(2, 5) - (s.staff.sales > 2 ? 1 : 0)), round, status: "sent" as const, clarified: prev?.clarified ?? false, total: lineUnits.reduce((t, u, i) => t + u * r.lines[i].qty, 0), lineUnits };
+  const ccur = DB.clientById[r.client] && COUNTRY[DB.clientById[r.client].country]?.cur; const qcur = opt.cur && opt.cur !== "USD" && opt.cur === ccur && s.fx[opt.cur] ? (opt.cur as string) : undefined;
+  const cq = { cur: qcur, fxAt: qcur ? s.fx[qcur] : undefined, termsDays: opt.termsDays ?? 30, promiseDays: a.promiseDays ?? promise, warrantyM: opt.warrantyM ?? 12, partialOk: !!opt.partialOk, sentDay: s.day, replyDay: s.day + Math.max(1, rng.int(2, 5) - (s.staff.sales > 2 ? 1 : 0)), round, status: "sent" as const, clarified: prev?.clarified ?? false, total: lineUnits.reduce((t, u, i) => t + u * r.lines[i].qty, 0), lineUnits };
   r.cq = cq; r.status = "quoted"; return ok(`Quotation ${round > 1 ? "revision " + round + " " : ""}sent. The customer will reply in a few days.`);
 }
 function replyCustomer(s: GameState, a: Action, rng: ReturnType<typeof R>): Result {
