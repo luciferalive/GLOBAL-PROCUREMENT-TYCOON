@@ -66,6 +66,7 @@ Sell above it. Always. Then check how much cash you must pay BEFORE the customer
 | 🗺️ **World map** | Animated routes for every shipment, coloured by transport mode. |
 | 📄 **18 document types** | RFQ, quotations, POs, packing lists, bills of lading, customs declarations, certificates of origin, invoices, receipts. Printable and stamped SIMULATED. |
 | 🏦 **Finance** | P&L, cash flow, bank loans, monthly payroll, 10% tax, prepay / LC / Net 30 / Net 60 terms. Bankruptcy is real. |
+| 🏆 **Achievements & Reports** | 22 trophies with live progress bars, win rate, on-time delivery, gross margin, revenue vs cost charts, top customers and suppliers. |
 | 🎓 **Training** | A 14-step campaign that ticks off as you do the real thing. |
 | 💾 **Saves** | 5 slots plus autosave every 5 minutes, stored in your browser. |
 
@@ -81,7 +82,11 @@ Sell above it. Always. Then check how much cash you must pay BEFORE the customer
 <td><img src="docs/shots/market.png"><br><b>Market Watch:</b> active shocks and FX history</td>
 </tr>
 <tr>
-<td colspan="2" align="center"><img src="docs/shots/competitors.png" width="60%"><br><b>Competitors:</b> six rivals, one leaderboard</td>
+<td><img src="docs/shots/competitors.png"><br><b>Competitors:</b> six rivals, one leaderboard</td>
+<td><img src="docs/shots/achievements.png"><br><b>Achievements:</b> 22 trophies with progress</td>
+</tr>
+<tr>
+<td colspan="2" align="center"><img src="docs/shots/reports.png" width="60%"><br><b>Reports:</b> revenue vs costs, top customers and suppliers</td>
 </tr>
 </table>
 
@@ -99,6 +104,7 @@ Sell above it. Always. Then check how much cash you must pay BEFORE the customer
 - [x] **Stage 1:** core loop: RFQ → quotes → landed cost → negotiation → orders → shipping → warehouse → finance → training
 - [x] **Stage 2:** customs actions, rival competitors, bill of lading / customs declaration / certificate of origin
 - [x] **Stage 3:** world events and Market Watch, FX history, regional shipping disruptions, demand booms
+- [x] **Stage 4:** achievements and business reports
 - [ ] **Next:** export processes, letters of credit, multiple warehouses, richer industry rules, more achievements
 
 ## ⚠️ Simulation notice
