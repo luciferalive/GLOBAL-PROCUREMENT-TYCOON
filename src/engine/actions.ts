@@ -19,6 +19,16 @@ export function dispatch(s: GameState, a: Action): Result {
     case "openRfq": { const r = rfqOf(s, a.id); if (r) { r.seen = true; s.flags.rfq_opened = true; } return ok(); }
     case "viewSupplier": s.flags.supplier_viewed = true; return ok();
     case "viewFreight": { const l = DB.logiById[a.logi]; if (l) { s.flags["fr_" + l.id] = true; if (/^DHL/.test(l.name)) s.flags.fr_dhl = true; if (/^Kuehne/.test(l.name)) s.flags.fr_kn = true; } return ok(); }
+    case "fixCustomsDocs": {
+      const sh = s.ships.find((x) => x.id === a.ship); if (!sh || sh.status !== "held") return bad("This shipment is not held."); if (sh.docsOk) return bad("The documents are already in order. Only an inspection delay remains.");
+      const fee = toC(120); if (s.cash < fee) return bad("Not enough cash."); cashOut(s, "customs", `Customs documentation fix ${sh.no}`, fee); plOf(s).customs += fee;
+      sh.docsOk = true; sh.heldUntil = Math.max(s.day + 1, Math.floor((s.day + sh.heldUntil) / 2)); s.flags.customs_fixed = true; return ok(`Corrected documents filed. ${sh.no} should be released on day ${sh.heldUntil}.`);
+    }
+    case "expediteCustoms": {
+      const sh = s.ships.find((x) => x.id === a.ship); if (!sh || (sh.status !== "held" && sh.status !== "customs")) return bad("This shipment is not at customs."); if (sh.heldUntil <= s.day) return bad("It is already being released.");
+      const fee = toC(sh.status === "held" ? 450 : 250); if (s.cash < fee) return bad("Not enough cash."); cashOut(s, "customs", `Priority customs processing ${sh.no}`, fee); plOf(s).customs += fee;
+      sh.heldUntil = s.day; return ok(`Priority clearance paid. ${sh.no} is released tomorrow.`);
+    }
     case "viewLanded": s.flags.landed_viewed = true; return ok();
 
     case "requestQuotes": {

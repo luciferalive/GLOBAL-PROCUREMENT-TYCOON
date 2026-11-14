@@ -17,9 +17,15 @@ A browser-based international procurement and trading simulation. You run a smal
 - **Vendor registration** for big customers; reputation, industries and certifications to unlock.
 - **Warehouse** (batch/serial, capacity, rent), **finance** (P&L, cash flow, loans, tax), **team**, **documents** (RFQ to receipt), **world map** with animated routes, **14-step training campaign**, **5 save slots + autosave** (browser storage).
 
+## Stage 2: customs, competitors, more documents
+
+- **Customs & Trade page:** shipments in clearance, holds (document query vs physical inspection), file corrected documents or pay for priority release, Incoterm cheat-sheet, simulated HS codes, duty and restrictions by origin country.
+- **Competitors:** six fictional rival trading houses bid on many RFQs. A cheaper rival can win the order; customers tell you roughly how far below you they were, and loyal customers tolerate a slightly higher price. Leaderboard of wins and losses.
+- **New documents:** supplier commercial invoice, certificate of origin, bill of lading / air waybill, customs import declaration.
+
 ## Honest status / roadmap
 
-Stage 1 covers the core loop, tested end to end (`npm test`). Still to come in later stages: deeper customs/export processes, more industry-specific rules, competitors, random world events at scale, multi-warehouse, richer documents (customs forms, LC, certificates), achievements and a more detailed map. The map is a stylised projection, not a precise atlas.
+Stages 1 and 2 are tested end to end (`npm test`). Still to come: export processes, more industry-specific rules, random world events at scale, multi-warehouse, letters of credit, more achievements and a more detailed map. The map is a stylised projection, not a precise atlas.
 
 ## Develop
 

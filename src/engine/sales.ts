@@ -2,6 +2,7 @@ import { DB, PERSONA_LABEL } from "../data/db.js";
 import type { CustResp, GameState, Rfq } from "./types.js";
 import type { Rng } from "./rng.js";
 import { landedCost } from "./pricing.js";
+import { RIVALS } from "../data/rivals.js";
 
 const CURVE: [number, number][] = [[0.9, 0.98], [1.0, 0.82], [1.05, 0.5], [1.1, 0.22], [1.2, 0.06], [1.35, 0]];
 export const pAcceptAt = (qe: number) => { if (qe <= CURVE[0][0]) return CURVE[0][1]; for (let i = 1; i < CURVE.length; i++) { const [x1, y1] = CURVE[i], [x0, y0] = CURVE[i - 1]; if (qe <= x1) return y0 + ((y1 - y0) * (qe - x0)) / (x1 - x0); } return 0; };
@@ -29,6 +30,15 @@ export function decide(s: GameState, r: Rfq, rng: Rng): CustResp {
   const reqCert = r.lines.some((l) => l.certs.length > 0), docs = r.lines.some((_, i) => land.byLine[i]?.docs !== "full");
   if (cq.round >= 3) return rng.chance(a.p) ? { type: "accept", msg: "Final offer accepted." } : { type: "reject", msg: "We could not agree on commercial terms after several rounds." };
   if (!r.urgent && rng.chance(0.015)) return { type: "cancel", msg: "Project postponed." };
+  if (r.rivals?.length) {
+    const best = r.rivals.slice().sort((x, y) => x.bid - y.bid)[0], rv = RIVALS.find((x) => x.id === best.id)!;
+    const loyal = ((s.rel[c.id] ?? 20) / 100) * (c.persona === "relationship" ? 0.08 : 0.03);
+    if (a.qe > best.bid + 0.02 + loyal) {
+      const gap = Math.round((a.q / best.bid - 1) * 100);
+      if (cq.round < 3 && rng.chance(0.4)) return { type: "revise", msg: `${rv.name} has offered us a lower price (we estimate about ${Math.max(2, gap)}% below yours). Can you improve your offer?`, rival: rv.id };
+      return { type: "reject", msg: `The order went to ${rv.name}, whose offer was about ${Math.max(2, gap)}% below yours.`, rival: rv.id };
+    }
+  }
   if (c.persona === "oemonly" && nonOem) return { type: "revise", msg: "We only buy from the OEM or its authorized distributors. Please re-quote from an authorized source." };
   if (altUsed) { const ok = c.persona === "oemonly" ? false : c.persona === "quality" ? rng.chance(0.25) : c.persona === "cert" ? rng.chance(0.3) : c.persona === "price" ? rng.chance(0.85) : rng.chance(0.55); if (!ok) return { type: "revise", msg: "We cannot approve the alternative (non-OEM) product. Please quote the specified brand." }; }
   if ((c.persona === "cert" || reqCert) && docs && !cq.clarified) { const none = r.lines.some((_, i) => land.byLine[i]?.docs === "none"); if (none && c.persona === "cert") return { type: "reject", msg: "Your source cannot provide the required certification and documentation." }; return { type: "clarify", msg: "Please confirm the technical specification and certificates (datasheets, conformity, origin)." }; }

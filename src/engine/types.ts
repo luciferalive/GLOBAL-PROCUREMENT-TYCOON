@@ -4,9 +4,9 @@ export type Cents = number;
 export interface Alloc { quote?: string; stockLot?: string; qty: number }
 export interface RfqLine { partId: string; qty: number; ref: Cents; certs: string[]; note: string; alloc: Alloc[]; margin: number }
 export type RfqStatus = "new" | "sourcing" | "quoted" | "negotiating" | "awarded" | "lost" | "expired" | "cancelled" | "completed";
-export interface CustResp { type: "accept" | "partial" | "reject" | "discount" | "revise" | "delivery" | "warranty" | "clarify" | "cancel"; msg: string; discount?: number; days?: number; warrantyM?: number; lines?: number[] }
+export interface CustResp { type: "accept" | "partial" | "reject" | "discount" | "revise" | "delivery" | "warranty" | "clarify" | "cancel"; msg: string; discount?: number; days?: number; warrantyM?: number; lines?: number[]; rival?: string }
 export interface CustQuote { termsDays: number; promiseDays: number; warrantyM: number; partialOk: boolean; sentDay: number; replyDay: number; round: number; status: "draft" | "sent" | "replied" | "accepted" | "rejected"; resp?: CustResp; clarified: boolean; total: Cents; lineUnits: Cents[] }
-export interface Rfq { id: number; no: string; client: string; day: number; due: number; needDays: number; dest: string; incoterm: string; urgent: boolean; status: RfqStatus; lines: RfqLine[]; seen: boolean; cq: CustQuote | null; so: number | null; ship: Record<string, { logi: string; mode: Mode; insure: boolean }>; note: string }
+export interface Rfq { id: number; no: string; client: string; day: number; due: number; needDays: number; dest: string; incoterm: string; urgent: boolean; status: RfqStatus; lines: RfqLine[]; seen: boolean; cq: CustQuote | null; so: number | null; ship: Record<string, { logi: string; mode: Mode; insure: boolean }>; note: string; rivals?: { id: string; bid: number }[] }
 export interface Quote { id: string; rfq: number; line: number; supplier: string; partId: string; status: "pending" | "received" | "declined" | "expired" | "ordered"; askedDay: number; replyDay: number; expiry: number; unit: Cents; cur: string; fx: number; qtyAvail: number; inStock: boolean; leadD: number; warrantyM: number; incoterm: string; terms: Terms; docs: "full" | "basic" | "none"; round: number; note: string; negBusyUntil: number; moq: number; alt?: boolean; rev?: { unit?: Cents; terms?: Terms; ok: boolean; msg: string } }
 export interface SoLine { partId: string; qty: number; unit: Cents; delivered: number; rfqLine: number }
 export interface So { id: number; no: string; rfq: number; client: string; day: number; needBy: number; termsDays: number; warrantyM: number; lines: SoLine[]; status: "open" | "delivering" | "delivered" | "closed" | "cancelled"; deliveryDay: number | null; purchased: boolean }
@@ -23,7 +23,9 @@ export interface News { day: number; text: string; kind: "info" | "good" | "bad"
 export interface Ledger { day: number; kind: string; text: string; amount: Cents }
 export interface Pl { rev: Cents; cogs: Cents; salaries: Cents; rent: Cents; freight: Cents; customs: Cents; bank: Cents; interest: Cents; tax: Cents; other: Cents }
 export interface Doc { id: string; kind: string; ref: string; day: number }
+export interface Rival { id: string; wins: number; losses: number; lastSeen: number }
 export interface GameState {
+  rivals?: Rival[];
   version: number; day: number; seed: number; name: string; difficulty: "easy" | "normal" | "hard"; over: string;
   cash: Cents; rep: number; fx: Record<string, number>; industries: string[]; certs: string[]; certPending: Record<string, number>; staff: Staff; whSize: number; paused: boolean; speed: number;
   rel: Record<string, number>; reg: Record<string, Reg>; rfqs: Rfq[]; quotes: Quote[]; sos: So[]; pos: Po[]; ships: Shipment[]; lots: Lot[]; invoices: Invoice[]; payables: Payable[]; loans: Loan[]; ledger: Ledger[]; news: News[]; docs: Doc[];

@@ -8,6 +8,7 @@ import { assess } from "../engine/sales.js";
 import { TRAINING } from "../engine/missions.js";
 import { act, bar, btn, esc, flag, kpi, line, pill, table } from "./dom.js";
 import { ui } from "./state.js";
+import { RIVALS } from "../data/rivals.js";
 
 export interface Page { id: string; title: string; icon: string; group: string; render(s: GameState): string }
 const stCls: Record<string, string> = { new: "info", sourcing: "warn", quoted: "acc", negotiating: "warn", awarded: "ok", lost: "bad", expired: "bad", cancelled: "bad", completed: "ok" };
@@ -60,7 +61,7 @@ const TERMS: Record<string, string> = { prepay: "Advance payment", lc: "Letter o
 function workbench(s: GameState, r: Rfq): string {
   const c = DB.clientById[r.client], land = landedCost(s, r), rel = s.rel[c.id] ?? 20; const open = ["new", "sourcing", "quoted", "negotiating"].includes(r.status);
   const opt = (r as any).opt ?? {}; const cq = r.cq;
-  let html = `<div class="ph"><h1>${esc(r.no)} ${pill(r.status, stCls[r.status])}${r.urgent ? " " + pill("URGENT", "bad") : ""}</h1><p class="sub">${btn("← All RFQs", { type: "ui", rfq: null }, "ghost sm")} ${flag(c.country)} <b>${esc(c.name)}</b> · ${PERSONA_LABEL[c.persona]} · relationship ${Math.round(rel)}/100 · pays ${Math.round(c.payRel * 100)}% on time · usual terms ${c.terms} days</p></div>
+  let html = `<div class="ph"><h1>${esc(r.no)} ${pill(r.status, stCls[r.status])}${r.urgent ? " " + pill("URGENT", "bad") : ""}</h1><p class="sub">${btn("← All RFQs", { type: "ui", rfq: null }, "ghost sm")} ${flag(c.country)} <b>${esc(c.name)}</b> · ${PERSONA_LABEL[c.persona]} · relationship ${Math.round(rel)}/100 · pays ${Math.round(c.payRel * 100)}% on time · usual terms ${c.terms} days</p>${r.rivals?.length ? `<p class="sm">⚔ Competing bidders: ${r.rivals.map((x) => esc(RIVALS.find((d) => d.id === x.id)?.name ?? "")).join(", ")}. Their prices are unknown to you.</p>` : ""}</div>
 <div class="kgrid k4">${kpi("Quote deadline", r.status === "new" || r.status === "sourcing" ? `Day ${r.due}` : "-", r.status === "new" || r.status === "sourcing" ? left(s, r.due) : "", "")}${kpi("Customer needs", `${r.needDays} days`, "after award", "")}${kpi("Delivery terms", r.incoterm, INCO_NOTE[r.incoterm], "")}${kpi("Destination", r.dest, "", "")}</div>`;
   r.lines.forEach((l, li) => {
     const part = DB.partsById[l.partId]; const qs = s.quotes.filter((q) => q.rfq === r.id && q.line === li); const allocd = l.alloc.reduce((a, x) => a + x.qty, 0);

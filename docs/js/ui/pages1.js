@@ -7,6 +7,7 @@ import { assess } from "../engine/sales.js";
 import { TRAINING } from "../engine/missions.js";
 import { act, btn, esc, flag, kpi, line, pill, table } from "./dom.js";
 import { ui } from "./state.js";
+import { RIVALS } from "../data/rivals.js";
 const stCls = { new: "info", sourcing: "warn", quoted: "acc", negotiating: "warn", awarded: "ok", lost: "bad", expired: "bad", cancelled: "bad", completed: "ok" };
 export const clientName = (id) => DB.clientById[id]?.name ?? id;
 const left = (s, d) => { const n = d - s.day; return n < 0 ? `<span class="bad">overdue ${-n}d</span>` : n <= 2 ? `<span class="warn">${n}d left</span>` : `${n}d left`; };
@@ -80,7 +81,7 @@ function workbench(s, r) {
     const open = ["new", "sourcing", "quoted", "negotiating"].includes(r.status);
     const opt = r.opt ?? {};
     const cq = r.cq;
-    let html = `<div class="ph"><h1>${esc(r.no)} ${pill(r.status, stCls[r.status])}${r.urgent ? " " + pill("URGENT", "bad") : ""}</h1><p class="sub">${btn("← All RFQs", { type: "ui", rfq: null }, "ghost sm")} ${flag(c.country)} <b>${esc(c.name)}</b> · ${PERSONA_LABEL[c.persona]} · relationship ${Math.round(rel)}/100 · pays ${Math.round(c.payRel * 100)}% on time · usual terms ${c.terms} days</p></div>
+    let html = `<div class="ph"><h1>${esc(r.no)} ${pill(r.status, stCls[r.status])}${r.urgent ? " " + pill("URGENT", "bad") : ""}</h1><p class="sub">${btn("← All RFQs", { type: "ui", rfq: null }, "ghost sm")} ${flag(c.country)} <b>${esc(c.name)}</b> · ${PERSONA_LABEL[c.persona]} · relationship ${Math.round(rel)}/100 · pays ${Math.round(c.payRel * 100)}% on time · usual terms ${c.terms} days</p>${r.rivals?.length ? `<p class="sm">⚔ Competing bidders: ${r.rivals.map((x) => esc(RIVALS.find((d) => d.id === x.id)?.name ?? "")).join(", ")}. Their prices are unknown to you.</p>` : ""}</div>
 <div class="kgrid k4">${kpi("Quote deadline", r.status === "new" || r.status === "sourcing" ? `Day ${r.due}` : "-", r.status === "new" || r.status === "sourcing" ? left(s, r.due) : "", "")}${kpi("Customer needs", `${r.needDays} days`, "after award", "")}${kpi("Delivery terms", r.incoterm, INCO_NOTE[r.incoterm], "")}${kpi("Destination", r.dest, "", "")}</div>`;
     r.lines.forEach((l, li) => {
         const part = DB.partsById[l.partId];

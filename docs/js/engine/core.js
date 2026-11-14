@@ -4,6 +4,7 @@ import { DB } from "../data/db.js";
 import { Rng } from "./rng.js";
 import { dutyRate, MONTHLY, toC } from "./pricing.js";
 import { decide } from "./sales.js";
+import { RIVALS } from "../data/rivals.js";
 import { checkMissions } from "./missions.js";
 export const SAVE_VERSION = 1;
 export class SRng extends Rng {
@@ -30,7 +31,7 @@ export function createGame(o = {}) {
     const fx = {};
     for (const c of COUNTRIES)
         fx[c.cur] = c.fx;
-    const s = { version: SAVE_VERSION, day: 0, seed: o.seed ?? 4242, name: o.name || "Gulf Star Trading WLL", difficulty, over: "", cash: toC(difficulty === "easy" ? 250_000 : difficulty === "hard" ? 120_000 : 180_000), rep: 10, fx, industries: INDUSTRIES.filter((i) => i.start).map((i) => i.id), certs: [], certPending: {}, staff: { sales: 1, proc: 1, logistics: 0, warehouse: 1, finance: 0, quality: 0, customs: 0, bd: 0, tech: 0 }, whSize: 1, paused: true, speed: 1,
+    const s = { rivals: RIVALS.map((r) => ({ id: r.id, wins: 0, losses: 0, lastSeen: 0 })), version: SAVE_VERSION, day: 0, seed: o.seed ?? 4242, name: o.name || "Gulf Star Trading WLL", difficulty, over: "", cash: toC(difficulty === "easy" ? 250_000 : difficulty === "hard" ? 120_000 : 180_000), rep: 10, fx, industries: INDUSTRIES.filter((i) => i.start).map((i) => i.id), certs: [], certPending: {}, staff: { sales: 1, proc: 1, logistics: 0, warehouse: 1, finance: 0, quality: 0, customs: 0, bd: 0, tech: 0 }, whSize: 1, paused: true, speed: 1,
         rel: {}, reg: {}, rfqs: [], quotes: [], sos: [], pos: [], ships: [], lots: [], invoices: [], payables: [], loans: [], ledger: [], news: [], docs: [], pl: {}, counters: {}, flags: {}, mods: { price: {}, freight: {}, customsUntil: 0, payDelayUntil: 0 }, missions: [], hist: [], stats: { won: 0, lost: 0, delivered: 0, late: 0, revenue: 0, countries: [] } };
     for (const c of DB.clients)
         if (c.starter)
@@ -82,6 +83,11 @@ export function genRfq(s, rng, client, urgent) {
         return genRfq(s, rng, client, urgent);
     const id = nid(s, "rfq");
     const r = { id, no: `RFQ-${2026 + Math.floor(s.day / 365)}-${String(1200 + id).padStart(6, "0")}`, client: client.id, day: s.day, due: s.day + (urgent ? 3 : rng.int(6, 12)), needDays: urgent ? rng.int(8, 14) : rng.int(21, 60), dest: "Doha, Qatar", incoterm: "DAP", urgent, status: "new", lines, seen: false, cq: null, so: null, ship: {}, note: urgent ? "URGENT: customer needs a fast response." : "" };
+    const nr = rng.chance(0.25) ? 0 : rng.chance(0.65) ? 1 : 2;
+    if (nr) {
+        const pool = RIVALS.slice().sort(() => rng.next() - 0.5).slice(0, nr);
+        r.rivals = pool.map((v) => ({ id: v.id, bid: +(v.aggr * rng.range(0.94, 1.07)).toFixed(3) }));
+    }
     s.rfqs.unshift(r);
     news(s, `${urgent ? "URGENT " : ""}${r.no} received from ${client.name}.`, urgent ? "warn" : "info");
     return r;
@@ -347,7 +353,11 @@ function events(s, rng) {
             if (r.cq)
                 r.cq.status = "rejected";
             s.stats.lost++;
-            news(s, `A competitor wins ${r.no} with a faster offer.`, "bad");
+            const rv = r.rivals?.[0] ? RIVALS.find((x) => x.id === r.rivals[0].id) : rng.pick(RIVALS);
+            const st = s.rivals?.find((x) => x.id === rv?.id);
+            if (st)
+                st.wins++;
+            news(s, `${rv?.name ?? "A competitor"} wins ${r.no} with a faster offer.`, "bad");
         }
     }
     else if (e === 10) {
@@ -373,6 +383,21 @@ export function customerReply(s, r, rng) {
     cq.status = "replied";
     cq.replyDay = s.day;
     const c = DB.clientById[r.client];
+    if (resp.rival) {
+        const st = s.rivals?.find((x) => x.id === resp.rival);
+        if (st) {
+            st.wins++;
+            st.lastSeen = s.day;
+        }
+    }
+    if ((resp.type === "accept" || resp.type === "partial") && r.rivals)
+        for (const v of r.rivals) {
+            const st = s.rivals?.find((x) => x.id === v.id);
+            if (st) {
+                st.losses++;
+                st.lastSeen = s.day;
+            }
+        }
     if (resp.type === "accept" || resp.type === "partial") {
         cq.status = "accepted";
         createSo(s, r, resp.type === "partial" ? resp.lines : undefined);

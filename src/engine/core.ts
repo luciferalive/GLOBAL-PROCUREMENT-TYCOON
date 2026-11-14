@@ -5,6 +5,7 @@ import type { Cents, GameState, Invoice, Lot, Payable, Pl, Po, Reg, Rfq, Shipmen
 import { Rng } from "./rng.js";
 import { dutyRate, MONTHLY, toC } from "./pricing.js";
 import { decide } from "./sales.js";
+import { RIVALS } from "../data/rivals.js";
 import { checkMissions } from "./missions.js";
 
 export const SAVE_VERSION = 1;
@@ -24,7 +25,7 @@ export const CERT_COST: Record<string, { cost: number; days: number }> = { "ISO 
 export function createGame(o: { name?: string; difficulty?: "easy" | "normal" | "hard"; seed?: number } = {}): GameState {
   const difficulty = o.difficulty ?? "normal";
   const fx: Record<string, number> = {}; for (const c of COUNTRIES) fx[c.cur] = c.fx;
-  const s: GameState = { version: SAVE_VERSION, day: 0, seed: o.seed ?? 4242, name: o.name || "Gulf Star Trading WLL", difficulty, over: "", cash: toC(difficulty === "easy" ? 250_000 : difficulty === "hard" ? 120_000 : 180_000), rep: 10, fx, industries: INDUSTRIES.filter((i) => i.start).map((i) => i.id), certs: [], certPending: {}, staff: { sales: 1, proc: 1, logistics: 0, warehouse: 1, finance: 0, quality: 0, customs: 0, bd: 0, tech: 0 }, whSize: 1, paused: true, speed: 1,
+  const s: GameState = { rivals: RIVALS.map((r) => ({ id: r.id, wins: 0, losses: 0, lastSeen: 0 })), version: SAVE_VERSION, day: 0, seed: o.seed ?? 4242, name: o.name || "Gulf Star Trading WLL", difficulty, over: "", cash: toC(difficulty === "easy" ? 250_000 : difficulty === "hard" ? 120_000 : 180_000), rep: 10, fx, industries: INDUSTRIES.filter((i) => i.start).map((i) => i.id), certs: [], certPending: {}, staff: { sales: 1, proc: 1, logistics: 0, warehouse: 1, finance: 0, quality: 0, customs: 0, bd: 0, tech: 0 }, whSize: 1, paused: true, speed: 1,
     rel: {}, reg: {}, rfqs: [], quotes: [], sos: [], pos: [], ships: [], lots: [], invoices: [], payables: [], loans: [], ledger: [], news: [], docs: [], pl: {}, counters: {}, flags: {}, mods: { price: {}, freight: {}, customsUntil: 0, payDelayUntil: 0 }, missions: [], hist: [], stats: { won: 0, lost: 0, delivered: 0, late: 0, revenue: 0, countries: [] } };
   for (const c of DB.clients) if (c.starter) s.reg[c.id] = { stage: 7, since: 0, wait: 0, result: "approved", reason: "Existing local customer", retryDay: 0 };
   news(s, "Welcome to " + s.name + ". Your first RFQs will arrive shortly. Open the Guide for the 14-step training campaign.", "info");
@@ -55,6 +56,7 @@ export function genRfq(s: GameState, rng: Rng, client: (typeof DB.clients)[numbe
   if (!lines.length) return genRfq(s, rng, client, urgent);
   const id = nid(s, "rfq");
   const r: Rfq = { id, no: `RFQ-${2026 + Math.floor(s.day / 365)}-${String(1200 + id).padStart(6, "0")}`, client: client.id, day: s.day, due: s.day + (urgent ? 3 : rng.int(6, 12)), needDays: urgent ? rng.int(8, 14) : rng.int(21, 60), dest: "Doha, Qatar", incoterm: "DAP", urgent, status: "new", lines, seen: false, cq: null, so: null, ship: {}, note: urgent ? "URGENT: customer needs a fast response." : "" };
+  const nr = rng.chance(0.25) ? 0 : rng.chance(0.65) ? 1 : 2; if (nr) { const pool = RIVALS.slice().sort(() => rng.next() - 0.5).slice(0, nr); r.rivals = pool.map((v) => ({ id: v.id, bid: +(v.aggr * rng.range(0.94, 1.07)).toFixed(3) })); }
   s.rfqs.unshift(r); news(s, `${urgent ? "URGENT " : ""}${r.no} received from ${client.name}.`, urgent ? "warn" : "info"); return r;
 }
 
@@ -142,7 +144,7 @@ function events(s: GameState, rng: Rng) {
   else if (e === 6) { const ps = s.pos.filter((p) => p.status === "placed"); if (ps.length) { const p = rng.pick(ps); const d = rng.int(4, 12); p.readyDay += d; p.delayed += d; const sh = s.ships.find((x) => x.id === p.ship); if (sh) { sh.depart += d; sh.arrive += d; } news(s, `${DB.supplierById[p.supplier].name} misses its ship date on ${p.no}: ${d} days late.`, "bad"); } }
   else if (e === 7) { s.mods.customsUntil = s.day + 10; news(s, "Customs authorities tighten inspections for 10 days. Expect more holds.", "warn"); }
   else if (e === 8) { const iv = s.invoices.filter((i) => !i.paid && i.payDay > s.day); if (iv.length) { const i = rng.pick(iv); const d = rng.int(7, 20); i.payDay += d; news(s, `${DB.clientById[i.client].name} delays payment of ${i.no} by ${d} days.`, "bad"); } }
-  else if (e === 9) { const rs = s.rfqs.filter((r) => r.status === "quoted" || r.status === "negotiating"); if (rs.length) { const r = rng.pick(rs); r.status = "lost"; if (r.cq) r.cq.status = "rejected"; s.stats.lost++; news(s, `A competitor wins ${r.no} with a faster offer.`, "bad"); } }
+  else if (e === 9) { const rs = s.rfqs.filter((r) => r.status === "quoted" || r.status === "negotiating"); if (rs.length) { const r = rng.pick(rs); r.status = "lost"; if (r.cq) r.cq.status = "rejected"; s.stats.lost++; const rv = r.rivals?.[0] ? RIVALS.find((x) => x.id === r.rivals![0].id) : rng.pick(RIVALS); const st = s.rivals?.find((x) => x.id === rv?.id); if (st) st.wins++; news(s, `${rv?.name ?? "A competitor"} wins ${r.no} with a faster offer.`, "bad"); } }
   else if (e === 10) { const c = rng.pick(Object.keys(s.fx)); const m = rng.range(-0.06, 0.06); s.fx[c] *= 1 + m; news(s, `${c} moves ${m > 0 ? "weaker" : "stronger"} against USD by ${Math.abs(m * 100).toFixed(1)}%.`, "info"); }
   else if (e === 11) { const lot = s.lots.find((l) => l.status === "ok" && !l.so); if (lot && rng.chance(0.4)) { /* stock discrepancy */ const d = Math.min(lot.qty, 1); lot.qty -= d; news(s, `Stock count discrepancy: ${d} unit missing from ${DB.partsById[lot.partId].pn}. Written off.`, "warn"); plOf(s).other += d * lot.unitCost; } }
 }
@@ -150,6 +152,8 @@ function events(s: GameState, rng: Rng) {
 export function customerReply(s: GameState, r: Rfq, rng: Rng) {
   const cq = r.cq!; const resp = decide(s, r, rng); cq.resp = resp; cq.status = "replied"; cq.replyDay = s.day;
   const c = DB.clientById[r.client];
+  if (resp.rival) { const st = s.rivals?.find((x) => x.id === resp.rival); if (st) { st.wins++; st.lastSeen = s.day; } }
+  if ((resp.type === "accept" || resp.type === "partial") && r.rivals) for (const v of r.rivals) { const st = s.rivals?.find((x) => x.id === v.id); if (st) { st.losses++; st.lastSeen = s.day; } }
   if (resp.type === "accept" || resp.type === "partial") { cq.status = "accepted"; createSo(s, r, resp.type === "partial" ? resp.lines : undefined); news(s, `${c.name} awards ${r.no}${resp.type === "partial" ? " (partial order)" : ""}.`, "good"); }
   else if (resp.type === "reject") { r.status = "lost"; cq.status = "rejected"; s.stats.lost++; s.rel[c.id] = (s.rel[c.id] ?? 20) - 1; news(s, `${c.name} rejects ${r.no}: ${resp.msg}`, "bad"); }
   else if (resp.type === "cancel") { r.status = "cancelled"; cq.status = "rejected"; news(s, `${c.name} cancels ${r.no}.`, "bad"); }

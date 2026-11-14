@@ -1,5 +1,6 @@
 import { DB, PERSONA_LABEL } from "../data/db.js";
 import { landedCost } from "./pricing.js";
+import { RIVALS } from "../data/rivals.js";
 const CURVE = [[0.9, 0.98], [1.0, 0.82], [1.05, 0.5], [1.1, 0.22], [1.2, 0.06], [1.35, 0]];
 export const pAcceptAt = (qe) => { if (qe <= CURVE[0][0])
     return CURVE[0][1]; for (let i = 1; i < CURVE.length; i++) {
@@ -48,6 +49,16 @@ export function decide(s, r, rng) {
         return rng.chance(a.p) ? { type: "accept", msg: "Final offer accepted." } : { type: "reject", msg: "We could not agree on commercial terms after several rounds." };
     if (!r.urgent && rng.chance(0.015))
         return { type: "cancel", msg: "Project postponed." };
+    if (r.rivals?.length) {
+        const best = r.rivals.slice().sort((x, y) => x.bid - y.bid)[0], rv = RIVALS.find((x) => x.id === best.id);
+        const loyal = ((s.rel[c.id] ?? 20) / 100) * (c.persona === "relationship" ? 0.08 : 0.03);
+        if (a.qe > best.bid + 0.02 + loyal) {
+            const gap = Math.round((a.q / best.bid - 1) * 100);
+            if (cq.round < 3 && rng.chance(0.4))
+                return { type: "revise", msg: `${rv.name} has offered us a lower price (we estimate about ${Math.max(2, gap)}% below yours). Can you improve your offer?`, rival: rv.id };
+            return { type: "reject", msg: `The order went to ${rv.name}, whose offer was about ${Math.max(2, gap)}% below yours.`, rival: rv.id };
+        }
+    }
     if (c.persona === "oemonly" && nonOem)
         return { type: "revise", msg: "We only buy from the OEM or its authorized distributors. Please re-quote from an authorized source." };
     if (altUsed) {

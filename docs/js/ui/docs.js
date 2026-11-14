@@ -3,6 +3,9 @@ import { DISCLAIMER } from "../data/lists.js";
 import { DB, MODE_LABEL } from "../data/db.js";
 import { dateStr, money2 } from "../engine/core.js";
 import { esc } from "./dom.js";
+import { hash } from "../engine/rng.js";
+import { CAT } from "../data/lists.js";
+export const hsCode = (cat) => { const h = hash(cat), ch = [84, 85, 73, 39, 90, 40, 82, 38, 87, 94][h % 10]; return `${ch}${String(h % 90 + 10)}.${String((h >>> 8) % 90 + 10)}`; };
 const page = (title, no, day, from, to, meta, head, rows, totals = [], notes = "") => `<div class="doc"><div class="sim">SIMULATED DOCUMENT · NOT A REAL BUSINESS RECORD</div><div class="dh"><div><h2>${esc(title)}</h2><b>${esc(no)}</b></div><div class="dr">Date: ${dateStr(day)}<br>Game day ${day}</div></div>
 <div class="dp"><div><span>From</span><b>${esc(from)}</b></div><div><span>To</span><b>${esc(to)}</b></div></div>${meta.length ? `<div class="dm">${meta.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join("")}</div>` : ""}
 <table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>
@@ -35,6 +38,18 @@ export function listDocs(s) {
     for (const sh of s.ships) {
         o.push({ ref: "fb:" + sh.id, kind: "Freight booking", title: sh.no, day: sh.day });
         o.push({ ref: "trk:" + sh.id, kind: "Shipment tracking", title: sh.no, day: sh.day });
+    }
+    for (const p of s.pos) {
+        if (p.status !== "placed")
+            o.push({ ref: "ci:" + p.id, kind: "Supplier invoice", title: `Supplier invoice for ${p.no}`, day: p.day });
+        if (p.docs !== "none" && p.ship)
+            o.push({ ref: "coo:" + p.id, kind: "Certificate of origin", title: `Certificate of origin ${p.no}`, day: p.day });
+    }
+    for (const sh of s.ships) {
+        if (!sh.supplierArranged || true)
+            o.push({ ref: "bl:" + sh.id, kind: ["express", "airfreight", "economy"].includes(sh.mode) ? "Air waybill" : "Bill of lading", title: `Transport document ${sh.no}`, day: sh.depart });
+        if (["customs", "held", "cleared", "delivered"].includes(sh.status))
+            o.push({ ref: "cd:" + sh.id, kind: "Customs declaration", title: `Import declaration ${sh.no}`, day: sh.arrive });
     }
     for (const i of s.invoices) {
         o.push({ ref: "inv:" + i.id, kind: "Commercial invoice", title: i.no, day: i.issue });
@@ -99,6 +114,26 @@ export function docHtml(s, ref) {
     if (k === "inv" || k === "rcpt") {
         const i = s.invoices.find((x) => x.id === n), c = DB.clientById[i.client], so = s.sos.find((x) => x.id === i.so);
         return page(k === "inv" ? "Commercial Invoice" : "Payment Receipt", (k === "inv" ? "" : "RCP-") + i.no, k === "inv" ? i.issue : i.payDay, ME(s), c.name, [["Order", so.no], ["Due", "day " + i.due], ["Status", i.paid ? "PAID day " + i.payDay : "open"]], ["Description", "Amount"], [["Goods supplied under " + so.no, money2(i.amount)]], [["Total (USD)", money2(i.amount)]]);
+    }
+    if (k === "ci") {
+        const p = s.pos.find((x) => x.id === n), sp = DB.supplierById[p.supplier];
+        return page("Supplier Commercial Invoice", "INV-" + p.no.slice(3), p.day, sp.name + ", " + COUNTRY[sp.country].name, ME(s), [["PO", p.no], ["Incoterm", p.incoterm], ["Payment", p.terms]], ["Part number", "Description", "Qty", "Unit", "Total"], p.lines.map((l) => [DB.partsById[l.partId].pn, DB.partsById[l.partId].desc, String(l.qty), money2(l.unit), money2(l.unit * l.qty)]), [["Invoice value", money2(p.value)]], "Prices in USD equivalent at the FX rate locked when the quotation was accepted.");
+    }
+    if (k === "coo") {
+        const p = s.pos.find((x) => x.id === n), sp = DB.supplierById[p.supplier];
+        return page("Certificate of Origin", "COO-" + p.no.slice(3), p.day, sp.name + ", " + COUNTRY[sp.country].name, "Chamber of Commerce (simulated)", [["Country of origin", COUNTRY[sp.country].name], ["Consignee", ME(s)]], ["Part number", "Description", "HS code", "Qty"], p.lines.map((l) => [DB.partsById[l.partId].pn, DB.partsById[l.partId].desc, hsCode(DB.partsById[l.partId].cat), String(l.qty)]), [], "The undersigned certifies that the goods described originate in the country shown. (Simulated certificate.)");
+    }
+    if (k === "bl") {
+        const sh = s.ships.find((x) => x.id === n);
+        const lg = DB.logiById[sh.logi];
+        const po = s.pos.find((p) => p.id === sh.po);
+        const air = ["express", "airfreight", "economy"].includes(sh.mode);
+        return page(air ? "Air Waybill" : sh.mode === "road" ? "CMR Consignment Note" : "Bill of Lading", (air ? "AWB-" : "BL-") + sh.no.slice(4), sh.depart, DB.supplierById[po.supplier].name + " (shipper)", ME(s) + " (consignee)", [["Carrier", lg?.name ?? "Supplier-arranged"], ["Mode", MODE_LABEL[sh.mode]], ["Origin", COUNTRY[sh.from]?.name ?? sh.from], ["Destination", "Doha, Qatar"], ["Departs", "day " + sh.depart], ["ETA", "day " + sh.arrive], ["Gross weight", sh.kg.toFixed(1) + " kg"], ["Volume", sh.vol.toFixed(2) + " m³"]], ["Part number", "Description", "Qty"], po.lines.map((l) => [DB.partsById[l.partId].pn, DB.partsById[l.partId].desc, String(l.qty)]), [], sh.insured ? "Cargo insured." : "Cargo not insured.");
+    }
+    if (k === "cd") {
+        const sh = s.ships.find((x) => x.id === n);
+        const po = s.pos.find((p) => p.id === sh.po);
+        return page("Customs Import Declaration", "IMP-" + sh.no.slice(4), sh.arrive, ME(s) + " (importer)", "Qatar Customs (simulated)", [["Origin", COUNTRY[sh.from]?.name ?? sh.from], ["Customs value", money2(po.value + sh.freight)], ["Status", sh.status.replace("_", " ")], ["Held until", sh.status === "held" ? "day " + sh.heldUntil : "-"], ["Documents", sh.docsOk ? "complete" : "query raised"]], ["Part number", "HS code", "Qty", "Category"], po.lines.map((l) => { const part = DB.partsById[l.partId]; return [part.pn, hsCode(part.cat), String(l.qty), CAT[part.cat]?.name ?? ""]; }), [["Duty", money2(sh.duty)], ["Clearance fee", money2(sh.clearance)], ["Local transport", money2(sh.local)]], "Duty is assessed on goods + freight + insurance. HS codes here are simulated, not real tariff classifications.");
     }
     return `<p>Unknown document.</p>`;
 }

@@ -67,3 +67,15 @@ test("a ruinous quote loses money, a sane one does not (landed cost really matte
   assert.ok(prof(cmp[0]) > 0, "a +14% quote earns a profit"); assert.ok(prof(cmp[1]) < 0, "a -15% quote loses money");
 });
 test("60-day idle run does not crash and RFQs keep arriving", () => { const s = createGame({ seed: 9 }); for (let i = 0; i < 60; i++) stepDay(s); assert.ok(s.rfqs.length >= 2); });
+test("customs actions: documents fix and priority release only work on the right shipments", () => {
+  const s = createGame({ seed: 5 });
+  assert.equal(dispatch(s, { type: "fixCustomsDocs", ship: 999 }).ok, false);
+  s.ships.push({ id: 1, no: "SHP-1", po: 0, logi: "", mode: "sea", from: "DE", day: 0, depart: 0, arrive: 5, status: "held", kg: 1, vol: 1, freight: 0, insured: false, duty: 0, clearance: 0, local: 0, heldUntil: s.day + 8, supplierArranged: false, inspect: false, docsOk: false, dutyPaid: false, cleared: false });
+  const c0 = s.cash; assert.ok(dispatch(s, { type: "fixCustomsDocs", ship: 1 }).ok); assert.ok(s.cash < c0 && s.ships[0].docsOk && s.ships[0].heldUntil < s.day + 8);
+  assert.equal(dispatch(s, { type: "fixCustomsDocs", ship: 1 }).ok, false, "cannot fix twice");
+  assert.ok(dispatch(s, { type: "expediteCustoms", ship: 1 }).ok); assert.equal(s.ships[0].heldUntil, s.day);
+});
+test("rivals: RFQs carry competitor bids and a cheaper rival can win the order", () => {
+  const s = createGame({ seed: 7 }); for (let i = 0; i < 40; i++) stepDay(s);
+  assert.ok(s.rfqs.some((r) => r.rivals?.length), "some RFQs have rival bidders"); assert.equal(s.rivals.length, 6);
+});
