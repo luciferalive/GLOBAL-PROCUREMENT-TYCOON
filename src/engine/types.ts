@@ -25,11 +25,11 @@ export interface Pl { rev: Cents; cogs: Cents; salaries: Cents; rent: Cents; fre
 export interface Doc { id: string; kind: string; ref: string; day: number }
 export interface Rival { id: string; wins: number; losses: number; lastSeen: number }
 export interface GameState {
-  rivals?: Rival[];
+  rivals?: Rival[]; fxHist?: Record<string, number[]>; evLog?: { day: number; text: string; kind: string }[];
   version: number; day: number; seed: number; name: string; difficulty: "easy" | "normal" | "hard"; over: string;
   cash: Cents; rep: number; fx: Record<string, number>; industries: string[]; certs: string[]; certPending: Record<string, number>; staff: Staff; whSize: number; paused: boolean; speed: number;
   rel: Record<string, number>; reg: Record<string, Reg>; rfqs: Rfq[]; quotes: Quote[]; sos: So[]; pos: Po[]; ships: Shipment[]; lots: Lot[]; invoices: Invoice[]; payables: Payable[]; loans: Loan[]; ledger: Ledger[]; news: News[]; docs: Doc[];
-  pl: Record<string, Pl>; counters: Record<string, number>; flags: Record<string, boolean>; mods: { price: Record<string, { f: number; until: number; why: string }>; freight: Record<string, { f: number; until: number; why: string }>; customsUntil: number; payDelayUntil: number }; missions: string[]; hist: { day: number; cash: Cents; nw: Cents; rev: Cents }[]; stats: { won: number; lost: number; delivered: number; late: number; revenue: Cents; countries: string[] };
+  pl: Record<string, Pl>; counters: Record<string, number>; flags: Record<string, boolean>; mods: { price: Record<string, { f: number; until: number; why: string }>; freight: Record<string, { f: number; until: number; why: string }>; customsUntil: number; payDelayUntil: number; region?: Record<string, { f: number; d: number; until: number; why: string; modes: string[] }>; demand?: Record<string, number>; congestUntil?: number }; missions: string[]; hist: { day: number; cash: Cents; nw: Cents; rev: Cents }[]; stats: { won: number; lost: number; delivered: number; late: number; revenue: Cents; countries: string[] };
 }
 export type Action = { type: string; [k: string]: any };
 export interface Result { ok: boolean; msg?: string }

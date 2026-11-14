@@ -55,9 +55,11 @@ export function freightQuote(s: GameState, lg: Logistic, mode: Mode, origin: str
   const ch = Math.max(kg, vol * volF);
   const factor = mode === "sea" ? 0.7 + d / 20000 : mode === "road" || mode === "rail" ? 0.6 + d / 6000 : 0.55 + d / 12000;
   const mod = s.mods.freight[lg.id]; const mm = mod && mod.until > s.day ? mod.f : 1;
-  const base = ch * (lg.rate[mode] ?? 1) * factor * o.freightIdx * mm;
+  const rd = s.mods.region?.[o.region]; const rh = rd && rd.until > s.day && rd.modes.includes(mode) ? rd : null;
+  const base = ch * (lg.rate[mode] ?? 1) * factor * o.freightIdx * mm * (rh ? rh.f : 1);
   const cost = (Math.max(lg.min, base) * (1 + lg.fuel * mm) + lg.docFee + lg.collect);
-  const days = Math.round(mode === "express" ? 2 + d / 9000 : mode === "airfreight" ? 3 + d / 5000 : mode === "economy" ? 6 + d / 4000 : mode === "sea" ? 12 + d / 450 : mode === "road" ? 3 + d / 700 : 14 + d / 700);
+  const days0 = Math.round(mode === "express" ? 2 + d / 9000 : mode === "airfreight" ? 3 + d / 5000 : mode === "economy" ? 6 + d / 4000 : mode === "sea" ? 12 + d / 450 : mode === "road" ? 3 + d / 700 : 14 + d / 700);
+  const days = days0 + (rh ? rh.d : 0);
   return { ok: true, cost: toC(cost), days, ins: insure ? Math.max(500, Math.round(valueC * lg.insPct)) : 0, chargeable: Math.round(ch) };
 }
 

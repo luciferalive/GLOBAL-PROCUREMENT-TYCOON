@@ -29,3 +29,34 @@ export const competitors = { id: "competitors", title: "Competitors", icon: "⚔
 <div class="panel"><h2>Leaderboard vs you</h2>${table(["Rival", "Country", "Style", "Wins over you", "Beaten by you", "Last seen"], RIVALS.map((d) => { const st = rv.find((x) => x.id === d.id); return [`<b>${esc(d.name)}</b>`, `${flag(d.country)} ${esc(COUNTRY[d.country]?.name ?? d.country)}`, esc(d.style), `<b class="bad">${st?.wins ?? 0}</b>`, `<b class="good">${st?.losses ?? 0}</b>`, st?.lastSeen ? "day " + st.lastSeen : "-"]; }))}</div>
 <div class="panel"><h2>Open RFQs with competition</h2>${table(["RFQ", "Customer", "Rivals invited", "Status"], open.map((r) => [`<b>${esc(r.no)}</b>`, esc(DB.clientById[r.client].name), r.rivals.map((x) => esc(RIVALS.find((d) => d.id === x.id).name)).join(", "), pill(r.status, "info")]))}<p class="sm">Tip: price-hungry rivals (Gulf Horizon, Indus Global) undercut you on plain goods. Premium rivals lose when you can deliver authorized-source documentation at a fair price.</p></div>`;
     } };
+import { COUNTRY as CT } from "../data/countries.js";
+import { IND } from "../data/lists.js";
+import { line } from "./dom.js";
+import { ui } from "./state.js";
+export const market = { id: "market", title: "Market Watch", icon: "📈", group: "Operations", render(s) {
+        const act = [];
+        for (const [o, m] of Object.entries(s.mods.price))
+            if (m.until > s.day)
+                act.push([m.f > 1 ? pill("Price up", "bad") : pill("Price down", "ok"), `${esc(DB.oemSupplier[o]?.name ?? o)}: ${m.f > 1 ? "+" : ""}${Math.round((m.f - 1) * 100)}% (${esc(m.why)})`, `${m.until - s.day} d`]);
+        for (const [l, m] of Object.entries(s.mods.freight))
+            if (m.until > s.day)
+                act.push([m.f > 1 ? pill("Freight up", "bad") : pill("Freight deal", "ok"), `${esc(DB.logiById[l]?.name ?? l)}: ${m.f > 1 ? "+" : ""}${Math.round((m.f - 1) * 100)}% (${esc(m.why)})`, `${m.until - s.day} d`]);
+        for (const [r, m] of Object.entries(s.mods.region ?? {}))
+            if (m.until > s.day)
+                act.push([pill("Disruption", "bad"), `${esc(r)}: ${esc(m.why)}. ${m.modes.join("/")} +${Math.round((m.f - 1) * 100)}% cost, +${m.d} days`, `${m.until - s.day} d`]);
+        for (const [i, u] of Object.entries(s.mods.demand ?? {}))
+            if (u > s.day)
+                act.push([pill("Demand boom", "ok"), `${esc(IND[i]?.name ?? i)}: customers send more RFQs`, `${u - s.day} d`]);
+        if (s.mods.customsUntil > s.day)
+            act.push([pill("Customs", "warn"), "Tightened inspections: more holds at Qatar customs", `${s.mods.customsUntil - s.day} d`]);
+        if ((s.mods.congestUntil ?? 0) > s.day)
+            act.push([pill("Port", "warn"), "Congestion at Hamad Port", `${s.mods.congestUntil - s.day} d`]);
+        const cur = ui.q.fxc ?? "EUR";
+        const hist = s.fxHist?.[cur] ?? [];
+        const base = Object.values(CT).find((c) => c.cur === cur)?.fx ?? 1;
+        const movers = Object.keys(s.fx).filter((c) => c !== "USD").map((c) => { const b = Object.values(CT).find((x) => x.cur === c)?.fx ?? s.fx[c]; return { c, ch: (s.fx[c] / b - 1) * 100 }; }).sort((a, b) => Math.abs(b.ch) - Math.abs(a.ch)).slice(0, 8);
+        return `<div class="ph"><h1>Market Watch</h1><p class="sub">Everything that is bending prices, freight and demand right now, with days remaining. Check it before you quote.</p></div>
+<div class="panel"><h2>Active market conditions (${act.length})</h2>${table(["Type", "What", "Ends in"], act)}</div>
+<div class="g2"><div class="panel"><h2>Currency: units per 1 USD</h2><div class="filters"><select data-ui="fxc">${Object.keys(s.fx).filter((c) => c !== "USD").map((c) => `<option ${c === cur ? "selected" : ""}>${c}</option>`).join("")}</select><span class="sm">now ${s.fx[cur]?.toFixed(4)} (start ${base})</span></div>${line(hist, 520, 150, "#38bdf8", (n) => n.toFixed(3))}<p class="sm">A weaker USD against a supplier's currency makes quotes already locked cheaper for you, and new ones dearer. Quotes keep the rate from the day they were made.</p></div>
+<div class="panel"><h2>Biggest currency moves since day 0</h2>${table(["Currency", "Change vs USD"], movers.map((m) => [m.c, `<b class="${m.ch > 0 ? "warn" : "good"}">${m.ch > 0 ? "+" : ""}${m.ch.toFixed(1)}%</b> <span class="sm">${m.ch > 0 ? "USD stronger" : "USD weaker"}</span>`]))}</div></div>`;
+    } };

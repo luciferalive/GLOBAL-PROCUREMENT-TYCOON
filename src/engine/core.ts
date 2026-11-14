@@ -89,7 +89,7 @@ export function stepDay(s: GameState) {
   const open = s.rfqs.filter(isOpen).length, cap = 10 + s.staff.sales * 3;
   if (open < cap) {
     const mult = (1 + 0.1 * (s.staff.sales - 1)) * (0.7 + s.rep / 120) * (s.difficulty === "easy" ? 1.25 : s.difficulty === "hard" ? 0.8 : 1);
-    for (const c of DB.clients) { const g = s.reg[c.id]; if (g?.result !== "approved" || !s.industries.includes(c.industry)) continue; if (rng.chance(c.rfqFreq * mult * 0.45)) { genRfq(s, rng, c, false); if (s.rfqs.filter(isOpen).length >= cap) break; } }
+    for (const c of DB.clients) { const g = s.reg[c.id]; if (g?.result !== "approved" || !s.industries.includes(c.industry)) continue; if (rng.chance(c.rfqFreq * mult * 0.45 * ((s.mods.demand?.[c.industry] ?? 0) > s.day ? 1.9 : 1))) { genRfq(s, rng, c, false); if (s.rfqs.filter(isOpen).length >= cap) break; } }
   }
   // 2. RFQ expiry
   for (const r of s.rfqs) if ((r.status === "new" || r.status === "sourcing") && s.day > r.due) { r.status = "expired"; s.stats.lost++; s.rep = Math.max(0, s.rep - 0.4); news(s, `${r.no} expired: no quotation sent before the deadline.`, "warn"); }
@@ -134,8 +134,11 @@ export function stepDay(s: GameState) {
 function events(s: GameState, rng: Rng) {
   for (const k of Object.keys(s.mods.price)) if (s.mods.price[k].until <= s.day) delete s.mods.price[k];
   for (const k of Object.keys(s.mods.freight)) if (s.mods.freight[k].until <= s.day) delete s.mods.freight[k];
-  if (!rng.chance(0.14)) return;
-  const e = rng.int(1, 11);
+  for (const k of Object.keys(s.mods.region ?? {})) if (s.mods.region![k].until <= s.day) delete s.mods.region![k];
+  for (const k of Object.keys(s.mods.demand ?? {})) if (s.mods.demand![k] <= s.day) delete s.mods.demand![k];
+  if (s.day % 5 === 0) { s.fxHist ??= {}; for (const c of Object.keys(s.fx)) { const a = (s.fxHist[c] ??= []); a.push(s.fx[c]); if (a.length > 60) a.shift(); } }
+  if (!rng.chance(0.16)) return;
+  const e = rng.int(1, 15);
   if (e === 1) { const o = rng.pick(DB.parts).oem; const f = rng.range(1.04, 1.12); const sup = DB.oemSupplier[o]; s.mods.price[o] = { f, until: s.day + rng.int(25, 45), why: "price increase" }; news(s, `${sup.name.replace(" (OEM)", "")} announces a ${Math.round((f - 1) * 100)}% price increase. Quotes for its products will cost more.`, "warn"); }
   else if (e === 2) { const o = rng.pick(DB.parts).oem; const f = rng.range(0.86, 0.94); s.mods.price[o] = { f, until: s.day + 12, why: "clearance" }; news(s, `A Gulf distributor offers clearance stock on ${DB.oemSupplier[o].name.replace(" (OEM)", "")} items: about ${Math.round((1 - f) * 100)}% cheaper for 12 days.`, "good"); }
   else if (e === 3) { const l = rng.pick(DB.logistics); const f = rng.range(1.12, 1.35); s.mods.freight[l.id] = { f, until: s.day + 20, why: "surcharge" }; news(s, `${l.name} introduces a temporary surcharge (+${Math.round((f - 1) * 100)}%).`, "warn"); }
@@ -146,6 +149,10 @@ function events(s: GameState, rng: Rng) {
   else if (e === 8) { const iv = s.invoices.filter((i) => !i.paid && i.payDay > s.day); if (iv.length) { const i = rng.pick(iv); const d = rng.int(7, 20); i.payDay += d; news(s, `${DB.clientById[i.client].name} delays payment of ${i.no} by ${d} days.`, "bad"); } }
   else if (e === 9) { const rs = s.rfqs.filter((r) => r.status === "quoted" || r.status === "negotiating"); if (rs.length) { const r = rng.pick(rs); r.status = "lost"; if (r.cq) r.cq.status = "rejected"; s.stats.lost++; const rv = r.rivals?.[0] ? RIVALS.find((x) => x.id === r.rivals![0].id) : rng.pick(RIVALS); const st = s.rivals?.find((x) => x.id === rv?.id); if (st) st.wins++; news(s, `${rv?.name ?? "A competitor"} wins ${r.no} with a faster offer.`, "bad"); } }
   else if (e === 10) { const c = rng.pick(Object.keys(s.fx)); const m = rng.range(-0.06, 0.06); s.fx[c] *= 1 + m; news(s, `${c} moves ${m > 0 ? "weaker" : "stronger"} against USD by ${Math.abs(m * 100).toFixed(1)}%.`, "info"); }
+  else if (e === 12) { const rg = rng.pick(["Asia", "Europe", "Americas", "Africa"]); const sea = rng.chance(0.6); const d = rng.int(15, 30); s.mods.region ??= {}; s.mods.region[rg] = { f: +(sea ? rng.range(1.25, 1.6) : rng.range(1.2, 1.45)).toFixed(2), d: sea ? rng.int(5, 12) : rng.int(1, 3), until: s.day + d, why: sea ? "port strike / canal disruption" : "airspace restrictions", modes: sea ? ["sea"] : ["airfreight", "express", "economy"] }; news(s, `${sea ? "Port strikes and shipping disruption" : "Airspace restrictions"} hit ${rg} for about ${d} days: ${sea ? "sea freight" : "air freight"} from there costs more and takes longer.`, "bad"); }
+  else if (e === 13) { const ind = rng.pick(s.industries); s.mods.demand ??= {}; s.mods.demand[ind] = s.day + rng.int(20, 35); news(s, `Demand boom in ${IND[ind]?.name ?? ind}: more RFQs arriving from those customers.`, "good"); }
+  else if (e === 14) { const oems = Array.from(new Set(DB.parts.map((p) => p.oem))); const k = rng.int(3, 5); const names: string[] = []; for (let i = 0; i < k; i++) { const o = rng.pick(oems); const f = rng.range(1.06, 1.14); s.mods.price[o] = { f, until: s.day + rng.int(25, 40), why: "global shortage" }; names.push(DB.oemSupplier[o].name.replace(" (OEM)", "")); } news(s, `Component shortage: ${names.join(", ")} raise prices 6 to 14%.`, "warn"); }
+  else if (e === 15) { s.mods.congestUntil = s.day + 12; let n = 0; for (const sh of s.ships) if (sh.status === "in_transit" && sh.mode === "sea") { sh.arrive += 3; n++; } news(s, `Port congestion at Hamad Port: ${n} sea shipment(s) delayed by 3 days.`, "warn"); }
   else if (e === 11) { const lot = s.lots.find((l) => l.status === "ok" && !l.so); if (lot && rng.chance(0.4)) { /* stock discrepancy */ const d = Math.min(lot.qty, 1); lot.qty -= d; news(s, `Stock count discrepancy: ${d} unit missing from ${DB.partsById[lot.partId].pn}. Written off.`, "warn"); plOf(s).other += d * lot.unitCost; } }
 }
 

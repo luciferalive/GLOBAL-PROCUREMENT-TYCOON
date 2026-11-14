@@ -79,3 +79,12 @@ test("rivals: RFQs carry competitor bids and a cheaper rival can win the order",
   const s = createGame({ seed: 7 }); for (let i = 0; i < 40; i++) stepDay(s);
   assert.ok(s.rfqs.some((r) => r.rivals?.length), "some RFQs have rival bidders"); assert.equal(s.rivals.length, 6);
 });
+test("world events: disruptions raise freight and lengthen transit, and expire", () => {
+  const s = createGame({ seed: 11 }); const dhl = DB.logistics.find((l) => l.name.startsWith("DHL"));
+  const before = freightQuote(s, dhl, "airfreight", "DE", 100, 1, 1000, false);
+  s.mods.region = { Europe: { f: 1.5, d: 3, until: s.day + 10, why: "test", modes: ["airfreight"] } };
+  const after = freightQuote(s, dhl, "airfreight", "DE", 100, 1, 1000, false);
+  assert.ok(after.cost > before.cost * 1.3 && after.days === before.days + 3);
+  s.day += 11; assert.equal(freightQuote(s, dhl, "airfreight", "DE", 100, 1, 1000, false).cost, before.cost);
+});
+test("120 days with random events never crashes and logs FX history", () => { const s = createGame({ seed: 21 }); for (let i = 0; i < 120; i++) stepDay(s); assert.ok(s.fxHist.EUR.length >= 20); });
