@@ -4,6 +4,7 @@ import { DB } from "../data/db.js";
 import type { Action, GameState, Po, Reg, Result, Rfq, Shipment } from "./types.js";
 import { SITE, SITES } from "../data/sites.js";
 import { exportOpt } from "./pricing.js";
+import { workforceAction } from "./workflow.js";
 import { LC_STEP, lcOf, stockUsed } from "./core.js";
 import { cashIn } from "./core.js";
 import { CERT_COST, R, cashOut, createSo, inspectLot, isOpen, money, netWorth, news, nid, plOf, registrationCheck, stepDay, whCap, whRentMonth, WH_STEP_RENT } from "./core.js";
@@ -160,7 +161,7 @@ export function dispatch(s: GameState, a: Action): Result {
     case "repay": { const l = s.loans.find((x) => x.id === a.id); if (!l) return bad("No loan."); if (s.cash < l.left) return bad("Not enough cash to repay in full."); cashOut(s, "loan", "Loan repaid early", l.left); s.loans = s.loans.filter((x) => x !== l); return ok(); }
     case "expandWh": { if (s.whSize >= 6) return bad("Largest warehouse already."); const dep = toC(5000); if (s.cash < dep) return bad("Not enough cash for the fit-out deposit ($5,000)."); cashOut(s, "rent", "Warehouse expansion fit-out", dep); plOf(s).other += dep; s.whSize++; return ok(`Capacity now ${whCap(s)} m3. Rent rises by ${money(toC(WH_STEP_RENT))} per month.`); }
     case "rename": s.name = String(a.name).slice(0, 40) || s.name; return ok();
-    default: return bad("Unknown action " + a.type);
+    default: { const w = workforceAction(s, a); return w ?? bad("Unknown action " + a.type); }
   }
 }
 

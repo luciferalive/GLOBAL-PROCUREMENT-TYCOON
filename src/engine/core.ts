@@ -11,6 +11,7 @@ import { checkMissions } from "./missions.js";
 
 export const SAVE_VERSION = 1;
 export class SRng extends Rng { constructor(private st: { seed: number }) { super(st.seed); } next() { this.seed = this.st.seed; const v = super.next(); this.st.seed = this.seed; return v; } }
+export const hooks: { day?: (s: GameState) => void } = {};
 export const R = (s: GameState) => new SRng(s);
 export const START_DATE = Date.UTC(2026, 0, 1);
 export const dateStr = (day: number) => new Date(START_DATE + day * 86400000).toISOString().slice(0, 10);
@@ -26,7 +27,7 @@ export const LC_BASE = 60_000, LC_STEP = 40_000;
 export const lcOf = (s: GameState) => (s.lc ??= { limit: Math.round(LC_BASE * 100), used: 0 });
 export const CERT_COST: Record<string, { cost: number; days: number }> = { "ISO 9001": { cost: 8000, days: 30 }, "ISO 13485": { cost: 12000, days: 40 }, AS9120: { cost: 15000, days: 45 }, "IATF 16949": { cost: 12000, days: 40 }, "ISO 27001": { cost: 10000, days: 35 }, "Defence vendor clearance": { cost: 25000, days: 60 } };
 
-export function createGame(o: { name?: string; difficulty?: "easy" | "normal" | "hard"; seed?: number } = {}): GameState {
+export function createGame(o: { name?: string; difficulty?: "easy" | "normal" | "hard"; seed?: number; team?: boolean } = {}): GameState {
   const difficulty = o.difficulty ?? "normal";
   const fx: Record<string, number> = {}; for (const c of COUNTRIES) fx[c.cur] = c.fx;
   const s: GameState = { rivals: RIVALS.map((r) => ({ id: r.id, wins: 0, losses: 0, lastSeen: 0 })), version: SAVE_VERSION, day: 0, seed: o.seed ?? 4242, name: o.name || "Gulf Star Trading WLL", difficulty, over: "", cash: toC(difficulty === "easy" ? 250_000 : difficulty === "hard" ? 120_000 : 180_000), rep: 10, fx, industries: INDUSTRIES.filter((i) => i.start).map((i) => i.id), certs: [], certPending: {}, staff: { sales: 1, proc: 1, logistics: 0, warehouse: 1, finance: 0, quality: 0, customs: 0, bd: 0, tech: 0 }, whSize: 1, paused: true, speed: 1,
@@ -36,6 +37,7 @@ export function createGame(o: { name?: string; difficulty?: "easy" | "normal" | 
   // first RFQs right away so the player can start
   const rng = R(s); const starters = DB.clients.filter((c) => c.starter);
   for (let i = 0; i < 2; i++) genRfq(s, rng, starters[i % starters.length], false);
+  if (o.team === false) s.flags.noTeam = true;
   return s;
 }
 export const nid = (s: GameState, k: string) => (s.counters[k] = (s.counters[k] ?? 0) + 1);
@@ -132,6 +134,7 @@ export function stepDay(s: GameState) {
   if (s.cash < 0) { const f = Math.round(-s.cash * 0.0006); cashOut(s, "bank", "Overdraft interest", f); plOf(s).interest += f; }
   if (s.day % 30 === 0) monthEnd(s);
   if (s.day % 2 === 0) { const nw0 = netWorth(s).total; s.hist.push({ day: s.day, cash: s.cash, nw: nw0, rev: s.stats.revenue }); if (s.hist.length > 400) s.hist.shift(); }
+  hooks.day?.(s);
   // 12. missions + game over
   checkMissions(s);
   const nw = netWorth(s).total; if (s.cash < toC(-150_000) || nw < toC(-100_000)) { s.over = "Bankrupt: your bank has frozen the accounts."; news(s, s.over, "bad"); }
@@ -271,7 +274,7 @@ export function completeDelivery(s: GameState, so: So, rng: Rng) {
 }
 function monthEnd(s: GameState) {
   const pl = plOf(s, s.day - 1);
-  let sal = 0; for (const [k, n] of Object.entries(s.staff)) sal += toC(MONTHLY[k as keyof typeof MONTHLY]) * n;
+  let sal = 0; if (s.wf) for (const e of s.wf.emps) sal += toC(e.salary); else for (const [k, n] of Object.entries(s.staff)) sal += toC(MONTHLY[k as keyof typeof MONTHLY]) * n;
   if (sal) { cashOut(s, "salaries", "Monthly salaries", sal); pl.salaries += sal; }
   for (const l of s.loans) { const interest = Math.round(l.left * l.rate / 12), prin = Math.round(l.principal / 12); const pay = Math.min(l.left, prin); l.left -= pay; cashOut(s, "loan", "Loan instalment + interest", pay + interest); pl.interest += interest; }
   s.loans = s.loans.filter((l) => l.left > 0);

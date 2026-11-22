@@ -16,6 +16,7 @@ export class SRng extends Rng {
     }
     next() { this.seed = this.st.seed; const v = super.next(); this.st.seed = this.seed; return v; }
 }
+export const hooks = {};
 export const R = (s) => new SRng(s);
 export const START_DATE = Date.UTC(2026, 0, 1);
 export const dateStr = (day) => new Date(START_DATE + day * 86400000).toISOString().slice(0, 10);
@@ -46,6 +47,8 @@ export function createGame(o = {}) {
     const starters = DB.clients.filter((c) => c.starter);
     for (let i = 0; i < 2; i++)
         genRfq(s, rng, starters[i % starters.length], false);
+    if (o.team === false)
+        s.flags.noTeam = true;
     return s;
 }
 export const nid = (s, k) => (s.counters[k] = (s.counters[k] ?? 0) + 1);
@@ -282,6 +285,7 @@ export function stepDay(s) {
         if (s.hist.length > 400)
             s.hist.shift();
     }
+    hooks.day?.(s);
     // 12. missions + game over
     checkMissions(s);
     const nw = netWorth(s).total;
@@ -750,8 +754,12 @@ export function completeDelivery(s, so, rng) {
 function monthEnd(s) {
     const pl = plOf(s, s.day - 1);
     let sal = 0;
-    for (const [k, n] of Object.entries(s.staff))
-        sal += toC(MONTHLY[k]) * n;
+    if (s.wf)
+        for (const e of s.wf.emps)
+            sal += toC(e.salary);
+    else
+        for (const [k, n] of Object.entries(s.staff))
+            sal += toC(MONTHLY[k]) * n;
     if (sal) {
         cashOut(s, "salaries", "Monthly salaries", sal);
         pl.salaries += sal;

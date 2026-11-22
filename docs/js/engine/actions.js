@@ -3,6 +3,7 @@ import { CAT, IND } from "../data/lists.js";
 import { DB } from "../data/db.js";
 import { SITE } from "../data/sites.js";
 import { exportOpt } from "./pricing.js";
+import { workforceAction } from "./workflow.js";
 import { LC_STEP, lcOf, stockUsed } from "./core.js";
 import { cashIn } from "./core.js";
 import { CERT_COST, R, cashOut, inspectLot, isOpen, money, netWorth, news, nid, plOf, registrationCheck, stepDay, whCap, whRentMonth, WH_STEP_RENT } from "./core.js";
@@ -509,7 +510,10 @@ export function dispatch(s, a) {
         case "rename":
             s.name = String(a.name).slice(0, 40) || s.name;
             return ok();
-        default: return bad("Unknown action " + a.type);
+        default: {
+            const w = workforceAction(s, a);
+            return w ?? bad("Unknown action " + a.type);
+        }
     }
 }
 function sendQuote(s, a, rng) {

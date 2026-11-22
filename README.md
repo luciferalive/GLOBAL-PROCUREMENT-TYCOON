@@ -77,6 +77,18 @@ Sell above it. Always. Then check how much cash you must pay BEFORE the customer
 | 🎓 **Training** | A 14-step campaign that ticks off as you do the real thing. |
 | 💾 **Saves** | 5 slots plus autosave every 5 minutes, stored in your browser. |
 
+## 👥 Run it as a CEO: the autonomous team
+
+Your employees are real workers, not bonuses. Each has a name, level, skills, personality, stress and morale, and they **do the work**:
+
+- **Sales** review new RFQs, price quotations within policy, answer customer counter-offers, follow up and chase new customers.
+- **Procurement** choose which suppliers to ask (not always the same ones), negotiate, compare quotes and pick suppliers per line.
+- **Logistics** compare carriers and modes, book freight, track shipments, fix customs paperwork and warn Warehouse and Sales.
+- **Warehouse** receive and inspect goods, then pick, pack and dispatch orders. **Finance** check cash before purchases, send payment reminders and forecast cash. **Quality** check documents.
+- Work goes to the best-suited, least-busy person; managers rebalance overloaded staff; tired people slow down and make mistakes; good people get promoted.
+- Everything above the limits you set (discounts, purchase value, contract size, customer credit) lands in your **Inbox & Approvals**. Autonomy is set per department: low, balanced, high or full.
+- Take over any single RFQ yourself, or switch autopilot off to play hands-on.
+
 ## 📸 Tour
 
 <table>

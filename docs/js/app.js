@@ -12,9 +12,10 @@ import { finance, orders, shipments, warehouse } from "./ui/pages2.js";
 import { banking, network, ledger } from "./ui/pages6.js";
 import { achievements, reports } from "./ui/pages5.js";
 import { customs, competitors, market } from "./ui/pages4.js";
+import { team, tasks, inbox, policies, kbPage, taskModal, inboxBadge } from "./ui/pages7.js";
 import { company, customers, documents, industries, logisticsPage, newsPage, settings, suppliers, training } from "./ui/pages3.js";
-const PAGES = [dashboard, rfqs, orders, shipments, customs, market, warehouse, network, suppliers, competitors, customers, logisticsPage, industries, company, finance, ledger, banking, reports, achievements, documents, training, newsPage, settings];
-const GROUPS = ["Operations", "Network", "Company", "Help"];
+const PAGES = [dashboard, rfqs, orders, shipments, customs, market, warehouse, network, suppliers, competitors, customers, logisticsPage, industries, company, team, tasks, inbox, policies, kbPage, finance, ledger, banking, reports, achievements, documents, training, newsPage, settings];
+const GROUPS = ["Operations", "Team", "Network", "Company", "Help"];
 let S = createGame();
 S.paused = true;
 let autoPause = true, lastLed = 0, chip = null;
@@ -217,6 +218,9 @@ function modal() {
             return "";
         body = `<h2>Negotiate with ${esc(DB.supplierById[q.supplier].name)}</h2><p class="sm">Current price ${money(q.unit)} per unit · round ${q.round + 1} of 3. Bigger asks are less likely to be accepted. A good relationship, reputation and an OEM-friendly attitude help.</p><div class="row"><label>Ask for a discount of <select id="negpct">${[3, 5, 8, 10, 15, 20].map((p) => `<option value="${p}">${p}%</option>`).join("")}</select></label>${btn("Ask for discount", { type: "negotiateQuote", id: q.id }, "pri", "data-pct='#negpct'")}</div><div class="row">${btn("Ask for longer credit terms", { type: "negotiateTerms", id: q.id }, "")}${btn("Cancel", { type: "ui", modal: null }, "ghost")}</div>`;
     }
+    else if (m.kind === "task") {
+        body = taskModal(S, m.id);
+    }
     else if (m.kind === "newgame") {
         body = `<h2>New game</h2><p class="sm">Starts a fresh company in Doha, Qatar. Your current game is replaced unless you saved it.</p><div class="form" id="ngf"><label>Company name<input data-f="name" value="Gulf Star Trading"></label><label>Difficulty<select data-f="difficulty"><option value="easy">Easy</option><option value="normal" selected>Normal</option><option value="hard">Hard</option></select></label></div><div class="row">${btn("Start", { type: "newgame" }, "pri", 'data-form="#ngf"')}${btn("Cancel", { type: "ui", modal: null }, "ghost")}</div>`;
     }
@@ -253,7 +257,7 @@ function render() {
 }
 function draw() {
     const s = S, pg = PAGES.find((p) => p.id === ui.page) ?? dashboard;
-    const badge = (id) => id === "rfqs" ? s.rfqs.filter((r) => !r.seen).length : id === "orders" ? s.sos.filter((o) => o.status === "open" || o.status === "delivering").length : 0;
+    const badge = (id) => id === "rfqs" ? s.rfqs.filter((r) => !r.seen).length : id === "orders" ? s.sos.filter((o) => o.status === "open" || o.status === "delivering").length : id === "inbox" ? inboxBadge(s) : 0;
     const nav = GROUPS.map((g) => `<div class="ng">${g}</div>${PAGES.filter((p) => p.group === g).map((p) => `<button class="ni ${p.id === ui.page ? "on" : ""}" data-act='${esc(JSON.stringify({ type: "ui", page: p.id, rfq: p.id === "rfqs" ? null : undefined, so: p.id === "orders" ? null : undefined }))}'><i>${p.icon}</i><span>${p.title}</span>${badge(p.id) ? `<em>${badge(p.id)}</em>` : ""}</button>`).join("")}`).join("");
     const sp = (n, l) => btn(l, { type: "setSpeed", value: n }, !s.paused && s.speed === n ? "on sm" : "sm");
     const html = `<div class="shell"><aside><div class="brand"><div class="logo">🌐</div><div><b>Global Procurement</b><span>TYCOON</span></div></div><nav>${nav}</nav><div class="aside-foot">Simulated data only</div></aside>

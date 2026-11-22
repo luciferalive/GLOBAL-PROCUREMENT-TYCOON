@@ -7,6 +7,7 @@ import { assess } from "../engine/sales.js";
 import { TRAINING } from "../engine/missions.js";
 import { act, btn, esc, flag, kpi, line, pill, table } from "./dom.js";
 import { ui } from "./state.js";
+import { wfOf, empName } from "../engine/staff.js";
 import { RIVALS } from "../data/rivals.js";
 import { RULES } from "../data/rules.js";
 const stCls = { new: "info", sourcing: "warn", quoted: "acc", negotiating: "warn", awarded: "ok", lost: "bad", expired: "bad", cancelled: "bad", completed: "ok" };
@@ -82,7 +83,9 @@ function workbench(s, r) {
     const open = ["new", "sourcing", "quoted", "negotiating"].includes(r.status);
     const opt = r.opt ?? {};
     const cq = r.cq;
-    let html = `<div class="ph"><h1>${esc(r.no)} ${pill(r.status, stCls[r.status])}${r.urgent ? " " + pill("URGENT", "bad") : ""}</h1><p class="sub">${btn("← All RFQs", { type: "ui", rfq: null }, "ghost sm")} ${flag(c.country)} <b>${esc(c.name)}</b> · ${PERSONA_LABEL[c.persona]} · relationship ${Math.round(rel)}/100 · pays ${Math.round(c.payRel * 100)}% on time · usual terms ${c.terms} days</p>${RULES[c.industry] ? `<p class="sm">📋 <b>${esc(IND[c.industry]?.name ?? "")} rules:</b> ${RULES[c.industry].text.map(esc).join(" · ")}</p>` : ""}${r.rivals?.length ? `<p class="sm">⚔ Competing bidders: ${r.rivals.map((x) => esc(RIVALS.find((d) => d.id === x.id)?.name ?? "")).join(", ")}. Their prices are unknown to you.</p>` : ""}</div>
+    const wfs = wfOf(s), wr = r.wf ?? {}, tm = wfs.on && !wr.manual, curT = wfs.tasks.filter((x) => x.rfq === r.id && ["pending", "active", "waiting", "approval", "blocked"].includes(x.status) && x.kind !== "log.track");
+    const teamBar = isOpen(r) ? `<div class="teambar ${tm ? "on" : ""}"><b>${tm ? "🤖 Your team is handling this RFQ" : wr.manual ? "✋ You took over this RFQ" : "Autopilot is off"}</b>${tm ? `<span class="sm">${curT.length ? curT.slice(0, 2).map((x) => `${esc(x.title)} → ${esc(empName(s, x.assignee))} (${esc(x.status)}${x.status === "blocked" ? ": " + esc(x.next) : ""})`).join(" · ") : "Stage: " + esc(wr.stage ?? "waiting")}</span>` : ""}${wfs.on ? btn(tm ? "Take over myself" : "Hand back to the team", { type: "rfqManual", rfq: r.id, on: tm }, "ghost xs") : ""}</div>` : "";
+    let html = teamBar + `<div class="ph"><h1>${esc(r.no)} ${pill(r.status, stCls[r.status])}${r.urgent ? " " + pill("URGENT", "bad") : ""}</h1><p class="sub">${btn("← All RFQs", { type: "ui", rfq: null }, "ghost sm")} ${flag(c.country)} <b>${esc(c.name)}</b> · ${PERSONA_LABEL[c.persona]} · relationship ${Math.round(rel)}/100 · pays ${Math.round(c.payRel * 100)}% on time · usual terms ${c.terms} days</p>${RULES[c.industry] ? `<p class="sm">📋 <b>${esc(IND[c.industry]?.name ?? "")} rules:</b> ${RULES[c.industry].text.map(esc).join(" · ")}</p>` : ""}${r.rivals?.length ? `<p class="sm">⚔ Competing bidders: ${r.rivals.map((x) => esc(RIVALS.find((d) => d.id === x.id)?.name ?? "")).join(", ")}. Their prices are unknown to you.</p>` : ""}</div>
 <div class="kgrid k4">${kpi("Quote deadline", r.status === "new" || r.status === "sourcing" ? `Day ${r.due}` : "-", r.status === "new" || r.status === "sourcing" ? left(s, r.due) : "", "")}${kpi("Customer needs", `${r.needDays} days`, "after award", "")}${kpi("Delivery terms", r.incoterm, INCO_NOTE[r.incoterm], "")}${kpi("Destination", r.dest, "", "")}</div>`;
     {
         const q1 = r.lines.every((_, li) => s.quotes.some((q) => q.rfq === r.id && q.line === li && q.status === "received")), q2 = r.lines.every((l) => l.alloc.reduce((a, x) => a + x.qty, 0) >= l.qty), q3 = q2 && land.issues.length === 0, q5 = !!cq;
