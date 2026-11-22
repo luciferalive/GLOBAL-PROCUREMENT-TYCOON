@@ -3,6 +3,7 @@ import { Rng } from "./rng.js";
 import { MONTHLY } from "./pricing.js";
 import { nid } from "./core.js";
 
+export const WORK_SCALE = 0.6;
 export const DEPTS: Dept[] = ["sales", "proc", "logistics", "warehouse", "finance", "quality"];
 export const DEPT_NAME: Record<Dept, string> = { sales: "Sales", proc: "Procurement", logistics: "Logistics", warehouse: "Warehouse", finance: "Finance", quality: "Quality & Technical" };
 export const DEPT_ICON: Record<Dept, string> = { sales: "💼", proc: "🛒", logistics: "🚚", warehouse: "📦", finance: "💰", quality: "🔬" };
@@ -33,7 +34,7 @@ export const defaultPolicy = (): Policy => ({ baseMargin: 14, minMargin: 6, disc
 const emptyKb = (): KB => ({ sup: {}, cat: {}, freight: {}, neg: {}, lessons: [] });
 const clamp = (n: number, a = 5, b = 98) => Math.max(a, Math.min(b, n));
 
-export function salaryFor(role: keyof Staff, level: Level, sk: Skills, mult = 1) { const avg = (sk.speed + sk.acc + sk.rel + sk.neg + sk.tech) / 5; return Math.round((MONTHLY[role] * LEVEL_MULT[level] * (0.8 + avg / 160) * mult) / 50) * 50; }
+export function salaryFor(role: keyof Staff, level: Level, sk: Skills, mult = 1) { const avg = (sk.speed + sk.acc + sk.rel + sk.neg + sk.tech) / 5; return Math.round((MONTHLY[role] * 0.55 * LEVEL_MULT[level] * (0.8 + avg / 160) * mult) / 50) * 50; }
 export function makeEmp(s: GameState, rng: Rng, role: keyof Staff, opt: { level?: Level; trait?: string } = {}): Omit<Emp, "id"> {
   const tr = TRAITS.find((x) => x.id === opt.trait) ?? rng.pick(TRAITS); const level: Level = opt.level ?? tr.level ?? (rng.chance(0.18) ? "senior" : rng.chance(0.3) ? "junior" : "officer");
   const lv = LEVELS.indexOf(level) * 6; const sk: Skills = { speed: 50, acc: 50, rel: 50, neg: 50, tech: 50 };
@@ -60,13 +61,13 @@ export const titleOf = (e: Emp) => (e.level === "manager" ? `${DEPT_NAME[e.dept]
 export const managerOf = (s: GameState, d: Dept) => wfOf(s).emps.find((e) => e.dept === d && e.level === "manager");
 export const openTasks = (s: GameState) => wfOf(s).tasks.filter((t) => t.status !== "done" && t.status !== "failed");
 export const loadOf = (s: GameState, e: Emp) => wfOf(s).tasks.filter((t) => t.assignee === e.id && (t.status === "pending" || t.status === "active")).reduce((a, t) => a + (t.pri === 3 ? 1.3 : 1), 0);
-export const capTasks = (e: Emp) => 3.5 + LEVELS.indexOf(e.level) * 0.7 + (e.sk.speed - 50) / 40;
+export const capTasks = (e: Emp) => 4.5 + LEVELS.indexOf(e.level) * 0.7 + (e.sk.speed - 50) / 40;
 export function say(s: GameState, from: string, to: string, text: string, imp: 1 | 2 | 3 = 1, ref?: string) {
   const w = wfOf(s); w.msgs.unshift({ id: nid(s, "msg"), day: s.day, from, to, text, imp, ref }); if (w.msgs.length > 500) w.msgs.length = 500;
 }
 export const lesson = (s: GameState, text: string) => { const k = wfOf(s).kb; if (k.lessons.some((l) => l.text === text)) return; k.lessons.unshift({ day: s.day, text }); if (k.lessons.length > 120) k.lessons.length = 120; };
 export function newTask(s: GameState, t: Pick<Task, "kind" | "dept" | "title" | "work" | "due"> & Partial<Task>): Task {
-  const w = wfOf(s); const task: Task = { id: nid(s, "task"), assignee: null, status: "pending", pri: 2, created: s.day, total: t.work, next: "Waiting to be assigned", log: [`Day ${s.day}: created`], ...t }; w.tasks.push(task); return task;
+  const w = wfOf(s); const work = Math.round(t.work * WORK_SCALE * 100) / 100; const task: Task = { id: nid(s, "task"), assignee: null, status: "pending", pri: 2, created: s.day, total: work, next: "Waiting to be assigned", log: [`Day ${s.day}: created`], ...t, work }; w.tasks.push(task); return task;
 }
 export const AUTONOMY_TEXT: Record<Autonomy, string> = { low: "Low: staff prepare, you approve nearly everything", balanced: "Balanced: routine work is theirs, bigger money needs approval", high: "High: staff approve up to 3× the limits", full: "Full: only major risks reach you (10× limits)" };
 export const AUT_MULT: Record<Autonomy, number> = { low: 0, balanced: 1, high: 3, full: 10 };

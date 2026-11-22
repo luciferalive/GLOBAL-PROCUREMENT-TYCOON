@@ -1,6 +1,7 @@
 import { Rng } from "./rng.js";
 import { MONTHLY } from "./pricing.js";
 import { nid } from "./core.js";
+export const WORK_SCALE = 0.6;
 export const DEPTS = ["sales", "proc", "logistics", "warehouse", "finance", "quality"];
 export const DEPT_NAME = { sales: "Sales", proc: "Procurement", logistics: "Logistics", warehouse: "Warehouse", finance: "Finance", quality: "Quality & Technical" };
 export const DEPT_ICON = { sales: "💼", proc: "🛒", logistics: "🚚", warehouse: "📦", finance: "💰", quality: "🔬" };
@@ -29,7 +30,7 @@ export const INDS_SPEC = ["oilgas", "power", "aviation", "medical", "marine", "c
 export const defaultPolicy = () => ({ baseMargin: 14, minMargin: 6, disc: { junior: 3, officer: 5, senior: 10, supervisor: 10, manager: 15 }, mgrDisc: 10, buyEmp: 2000, buyMgr: 10000, quoteCeo: 60000, urgentCeo: false, creditPerClient: 120000, cashReserve: 15000, freightPref: "balanced", notify: 2, negotiate: true });
 const emptyKb = () => ({ sup: {}, cat: {}, freight: {}, neg: {}, lessons: [] });
 const clamp = (n, a = 5, b = 98) => Math.max(a, Math.min(b, n));
-export function salaryFor(role, level, sk, mult = 1) { const avg = (sk.speed + sk.acc + sk.rel + sk.neg + sk.tech) / 5; return Math.round((MONTHLY[role] * LEVEL_MULT[level] * (0.8 + avg / 160) * mult) / 50) * 50; }
+export function salaryFor(role, level, sk, mult = 1) { const avg = (sk.speed + sk.acc + sk.rel + sk.neg + sk.tech) / 5; return Math.round((MONTHLY[role] * 0.55 * LEVEL_MULT[level] * (0.8 + avg / 160) * mult) / 50) * 50; }
 export function makeEmp(s, rng, role, opt = {}) {
     const tr = TRAITS.find((x) => x.id === opt.trait) ?? rng.pick(TRAITS);
     const level = opt.level ?? tr.level ?? (rng.chance(0.18) ? "senior" : rng.chance(0.3) ? "junior" : "officer");
@@ -65,7 +66,7 @@ export const titleOf = (e) => (e.level === "manager" ? `${DEPT_NAME[e.dept]} Man
 export const managerOf = (s, d) => wfOf(s).emps.find((e) => e.dept === d && e.level === "manager");
 export const openTasks = (s) => wfOf(s).tasks.filter((t) => t.status !== "done" && t.status !== "failed");
 export const loadOf = (s, e) => wfOf(s).tasks.filter((t) => t.assignee === e.id && (t.status === "pending" || t.status === "active")).reduce((a, t) => a + (t.pri === 3 ? 1.3 : 1), 0);
-export const capTasks = (e) => 3.5 + LEVELS.indexOf(e.level) * 0.7 + (e.sk.speed - 50) / 40;
+export const capTasks = (e) => 4.5 + LEVELS.indexOf(e.level) * 0.7 + (e.sk.speed - 50) / 40;
 export function say(s, from, to, text, imp = 1, ref) {
     const w = wfOf(s);
     w.msgs.unshift({ id: nid(s, "msg"), day: s.day, from, to, text, imp, ref });
@@ -77,7 +78,8 @@ export const lesson = (s, text) => { const k = wfOf(s).kb; if (k.lessons.some((l
     k.lessons.length = 120; };
 export function newTask(s, t) {
     const w = wfOf(s);
-    const task = { id: nid(s, "task"), assignee: null, status: "pending", pri: 2, created: s.day, total: t.work, next: "Waiting to be assigned", log: [`Day ${s.day}: created`], ...t };
+    const work = Math.round(t.work * WORK_SCALE * 100) / 100;
+    const task = { id: nid(s, "task"), assignee: null, status: "pending", pri: 2, created: s.day, total: work, next: "Waiting to be assigned", log: [`Day ${s.day}: created`], ...t, work };
     w.tasks.push(task);
     return task;
 }

@@ -113,7 +113,8 @@ function processApprovals(s) {
 /* ---------------- scanning: turn game state into tasks ---------------- */
 function scan(s) {
     const w = wfOf(s);
-    for (const r of s.rfqs) {
+    const rv = (r) => r.lines.reduce((a, l) => a + l.ref * l.qty, 0) / Math.max(3, r.due - s.day);
+    for (const r of s.rfqs.slice().sort((a, b) => (b.urgent ? 1e9 : 0) + rv(b) - ((a.urgent ? 1e9 : 0) + rv(a)))) {
         if (!isOpen(r))
             continue;
         const wf = (r.wf ??= {});
@@ -127,6 +128,13 @@ function scan(s) {
             continue;
         }
         if ((r.status === "new" || r.status === "sourcing") && wf.reviewed && !wf.sourced && !has(s, "proc.source", k)) {
+            const pe = w.emps.filter((x) => x.dept === "proc"), pcap = pe.length ? pe.reduce((a, x) => a + capTasks(x), 0) : 3;
+            const backlog = w.tasks.filter((x) => x.dept === "proc" && (x.status === "pending" || x.status === "active")).length;
+            if (backlog >= pcap * 1.2 && !urgent) {
+                wf.stage = "queued: waiting for procurement capacity";
+                continue;
+            }
+            wf.stage = "sourcing";
             newTask(s, { ...base, kind: "proc.source", dept: "proc", title: `Source ${r.no}: ask suppliers (${ln} line${ln > 1 ? "s" : ""})`, work: 0.3 + 0.2 * ln });
             continue;
         }
@@ -179,6 +187,14 @@ function scan(s) {
                 newTask(s, { kind: "fin.check", dept: "finance", title: `Check cash and payment terms for ${so.no}`, so: so.id, rfq: so.rfq, ref: k, work: 0.3, due: s.day + 2, pri: 3 });
             else if (wf.finOk && !ever(s, "proc.po", k))
                 newTask(s, { kind: "proc.po", dept: "proc", title: `Place purchase orders for ${so.no}`, so: so.id, rfq: so.rfq, ref: k, work: 0.5, due: s.day + 2, pri: 3 });
+        }
+        if (so.status === "open" && so.purchased && !s.pos.some((p) => p.so === so.id && ["placed", "ready", "shipped", "late"].includes(p.status))) {
+            so.lines.forEach((l, i) => {
+                const have = s.lots.filter((x) => x.so === so.id && x.soLine === i && x.status !== "damaged").reduce((a, x) => a + x.qty, 0), miss = l.qty - l.delivered - have;
+                const k = `so:${so.id}:${i}:${miss}`;
+                if (miss > 0 && !ever(s, "proc.shortage", k))
+                    newTask(s, { kind: "proc.shortage", dept: "proc", title: `Cover shortage of ${miss} × ${DB.partsById[l.partId].pn} on ${so.no}`, so: so.id, rfq: so.rfq, ref: k, work: 0.3, due: Math.max(s.day + 1, so.needBy - 6), pri: 3, data: { line: i, miss } });
+            });
         }
         if (so.status === "open" && so.purchased) {
             const have = so.lines.map((l, i) => Math.min(l.qty - l.delivered, s.lots.filter((x) => x.so === so.id && x.soLine === i && x.status === "ok").reduce((a, x) => a + x.qty, 0)));
@@ -590,6 +606,22 @@ const HANDLERS = {
         const ar = s.invoices.filter((i) => i.client === c.id && !i.paid).reduce((a, i) => a + i.amount, 0) + s.sos.filter((o) => o.client === c.id && ["open", "delivering"].includes(o.status)).reduce((a, o) => a + o.lines.reduce((x, l) => x + l.unit * l.qty, 0), 0);
         if (gate(s, t, e, value, "quote", { credit: usd(ar) + value > pol.creditPerClient * Math.max(1, AUT_MULT[wfOf(s).autonomy.sales] / 3), urgent: r.urgent }))
             return "approval";
+        {
+            const pol2 = wfOf(s).policy;
+            const exposure = s.sos.filter((o) => o.status === "open" || o.status === "delivering").reduce((a, o) => a + o.lines.reduce((x, l) => x + (l.qty - l.delivered) * l.unit / 1.12, 0), 0);
+            const mine = land.byLine && r.lines.reduce((a, _, i) => a + land.byLine[i].unit * r.lines[i].qty, 0);
+            const funds = s.cash + 0.8 * s.invoices.filter((i) => !i.paid).reduce((a, i) => a + i.amount, 0) - pol2.cashReserve * 100;
+            if (exposure + mine > funds * 1.4 && !t.approved) {
+                t.data = { ...(t.data ?? {}), holds: (t.data?.holds ?? 0) + 1 };
+                if (t.data.holds <= 4 || (r.due - s.day) > 3) {
+                    t.wake = s.day + 2;
+                    t.next = `Finance hold: open orders (${money(exposure)}) plus this one (${money(mine)}) exceed what cash can fund`;
+                    if (t.data.holds === 1)
+                        toCeo(s, "Finance", `Holding the quotation for ${r.no}: we cannot fund more orders right now (cash ${money(s.cash)}, open order cost ${money(exposure)}). Deliveries and payments will free funds.`, 2, "rfq:" + r.id);
+                    return "wait";
+                }
+            }
+        }
         r.lines.forEach((_, i) => dispatch(s, { type: "setMargin", rfq: r.id, line: i, pct: m }));
         dispatch(s, { type: "setCq", rfq: r.id, opt: { termsDays: Math.min(60, c.terms || 30), warrantyM: 12 } });
         const res = dispatch(s, { type: "sendQuote", rfq: r.id });
@@ -828,6 +860,31 @@ const HANDLERS = {
         }
         return "done";
     },
+    "proc.shortage"(s, t, e) {
+        const so = s.sos.find((x) => x.id === t.so);
+        if (!so || so.status !== "open")
+            return "done";
+        const i = t.data.line, l = so.lines[i], part = DB.partsById[l.partId];
+        const have = s.lots.filter((x) => x.so === so.id && x.soLine === i && x.status !== "damaged").reduce((a, x) => a + x.qty, 0), miss = l.qty - l.delivered - have;
+        if (miss <= 0)
+            return "done";
+        const cost = Math.round(part.list * 1.12 * 100) * miss;
+        if (gate(s, t, e, usd(cost), "buy", { urgent: true }))
+            return "approval";
+        const res = dispatch(s, { type: "topUp", so: so.id, line: i });
+        if (!res.ok) {
+            t.data.tries = (t.data.tries ?? 0) + 1;
+            t.wake = s.day + 2;
+            t.next = res.msg ?? "failed";
+            if (t.data.tries === 1)
+                toCeo(s, who(e), `${so.no}: ${miss} × ${part.pn} short after damage. ${res.msg}`, 2, "so:" + so.id);
+            return t.data.tries > 5 ? "fail" : "wait";
+        }
+        t.next = `Bought ${miss} locally (premium price)`;
+        toCeo(s, who(e), `${so.no}: ${miss} × ${part.pn} were damaged or missing. Bought replacements locally for ${money(cost)} so the order can ship.`, 2, "so:" + so.id);
+        lesson(s, `Shortage on ${so.no}: covered ${miss} × ${part.pn} with a local emergency purchase.`);
+        return "done";
+    },
     "wh.dispatch"(s, t, e) {
         const so = s.sos.find((x) => x.id === t.so);
         if (!so || so.status !== "open")
@@ -885,7 +942,7 @@ function rank(s, r, qs, e, slip) {
         let pen = 0;
         const slack = r.needDays - (q.leadD + (sup.country === "QA" ? 2 : 9));
         if (slack < 0)
-            pen += Math.min(0.5, -slack * 0.03) * (r.urgent ? 1.5 : 1);
+            pen += Math.min(2.5, -slack * 0.05) * (r.urgent ? 1.5 : 1);
         pen += { prepay: 0.03, net30: -0.01, net60: -0.025, lc: 0.01 }[q.terms];
         pen += (1 - sup.reliab) * 0.4 + (kb.sup[sup.id]?.late ?? 0) * 0.03 + (kb.sup[sup.id]?.bad ?? 0) * 0.05 + (q.inStock ? 0 : 0.02);
         if ((rules?.fullDocs || r.lines.some((l) => l.certs.length)) && q.docs !== "full")
@@ -958,7 +1015,7 @@ export function workforceDay(s) {
             assign(s, t);
         }
     balance(s);
-    const RANK = { "sales.reply": 0, "sales.quote": 1, "log.freight": 2, "qa.review": 3, "proc.compare": 4, "proc.source": 6, "sales.review": 5 };
+    const RANK = { "sales.reply": 0, "sales.quote": 1, "log.freight": 2, "qa.review": 3, "proc.compare": 4, "proc.shortage": 1, "proc.source": 6, "sales.review": 5 };
     const order = (a, b) => b.pri - a.pri || (RANK[a.kind] ?? 3) - (RANK[b.kind] ?? 3) || a.due - b.due || a.id - b.id;
     for (const e of w.emps.slice()) {
         if (!w.emps.includes(e))
@@ -1026,17 +1083,17 @@ export function workforceDay(s) {
             }
         }
         // stress, morale, learning, promotion hints, resignation
-        const tgt = Math.min(100, 20 + 42 * ratio);
+        const tgt = Math.min(92, 20 + 30 * ratio);
         e.stress += (tgt - e.stress) * 0.15;
         e.stress = Math.max(5, Math.min(100, e.stress));
-        e.morale += e.stress > 70 ? -0.9 : e.stress < 40 ? 0.35 : -0.1;
+        e.morale += e.stress > 75 ? -0.6 : e.stress < 45 ? 0.35 : 0;
         e.morale = Math.max(0, Math.min(100, e.morale));
-        e.lowMorale = e.morale < 15 ? e.lowMorale + 1 : 0;
+        e.lowMorale = e.morale < 10 ? e.lowMorale + 1 : 0;
         if (e.exp >= PROMO_EXP[e.level] && !w.cap[`promo:${e.id}:${e.level}`]) {
             w.cap[`promo:${e.id}:${e.level}`] = 1;
             toCeo(s, DEPT_NAME[e.dept], `${e.name} has completed ${e.exp} tasks and is ready for promotion to ${LEVELS[LEVELS.indexOf(e.level) + 1]}.`, 2);
         }
-        if (e.lowMorale > 12) {
+        if (e.lowMorale > 25) {
             w.emps = w.emps.filter((x) => x.id !== e.id);
             for (const t of w.tasks)
                 if (t.assignee === e.id) {
