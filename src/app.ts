@@ -14,15 +14,17 @@ import { finance, orders, shipments, warehouse } from "./ui/pages2.js";
 import { banking, network, ledger } from "./ui/pages6.js";
 import { achievements, reports } from "./ui/pages5.js";
 import { customs, competitors, market } from "./ui/pages4.js";
-import { team, tasks, inbox, policies, kbPage, taskModal, inboxBadge } from "./ui/pages7.js";
+import { team, tasks, inbox, policies, kbPage, dreports, taskModal, inboxBadge } from "./ui/pages7.js";
 import { wfOf } from "./engine/staff.js";
 import { company, customers, documents, industries, logisticsPage, newsPage, settings, suppliers, training } from "./ui/pages3.js";
 
-const PAGES: Page[] = [dashboard, rfqs, orders, shipments, customs, market, warehouse, network, suppliers, competitors, customers, logisticsPage, industries, company, team, tasks, inbox, policies, kbPage, finance, ledger, banking, reports, achievements, documents, training, newsPage, settings];
+const PAGES: Page[] = [dashboard, rfqs, orders, shipments, customs, market, warehouse, network, suppliers, competitors, customers, logisticsPage, industries, company, team, tasks, inbox, policies, kbPage, dreports, finance, ledger, banking, reports, achievements, documents, training, newsPage, settings];
 const GROUPS = ["Operations", "Team", "Network", "Company", "Help"];
 let S: GameState = createGame();
 S.paused = true;
 let autoPause = true, lastLed = 0, chip: { amt: number; text: string; until: number } | null = null;
+let lastMsg = 0;
+function watchMsgs() { const w = S.wf; if (!w || !w.msgs.length) return; const top = w.msgs[0].id; if (!lastMsg) { lastMsg = top; return; } for (const m of w.msgs) { if (m.id <= lastMsg) break; if (m.to === "CEO" && m.imp === 3) toast("✋ " + m.text, true); } lastMsg = top; }
 function watchCash() {
   const fresh = S.ledger.filter((l) => (l.id ?? 0) > lastLed); if (S.ledger[0]?.id) lastLed = Math.max(lastLed, S.ledger[0].id!); if (!fresh.length) return;
   const net = fresh.reduce((a, l) => a + l.amount, 0); const big = fresh.filter((l) => l.kind === "customer" || l.kind === "loan" || l.kind === "claim" || l.kind === "mission");
@@ -55,11 +57,11 @@ function applyUi(a: any) {
   if (a.print) { const w = window.open("", "_blank"); if (w) { w.document.write(`<html><head><title>Document</title><link rel="stylesheet" href="style.css"></head><body class="printbody">${docHtml(S, a.print)}</body></html>`); w.document.close(); setTimeout(() => w.print(), 400); } }
   if (a.saveDoc) { const blob = new Blob([`<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body class="printbody">${docHtml(S, a.saveDoc)}</body></html>`], { type: "text/html" }); const l = document.createElement("a"); l.href = URL.createObjectURL(blob); l.download = a.saveDoc.replace(":", "-") + ".html"; l.click(); }
   if (a.save) putSave(a.save).then((ok) => { toast(ok ? `Saved to slot ${a.save}.` : "Could not save (browser storage blocked).", !ok); render(); slotList(); });
-  if (a.load) getSave(a.load).then((v) => { if (!v) return toast("That slot is empty.", true); S = v.state; S.paused = true; lastLed = S.ledger[0]?.id ?? 0; chip = null; ui.rfq = null; ui.so = null; ui.modal = null; toast(`Loaded ${a.load === "auto" ? "autosave" : "slot " + a.load}.`); render(); });
+  if (a.load) getSave(a.load).then((v) => { if (!v) return toast("That slot is empty.", true); S = v.state; S.paused = true; lastMsg = 0; lastLed = S.ledger[0]?.id ?? 0; chip = null; ui.rfq = null; ui.so = null; ui.modal = null; toast(`Loaded ${a.load === "auto" ? "autosave" : "slot " + a.load}.`); render(); });
 }
 function run(a: any) {
   if (a.type === "ui") { applyUi(a); render(); return; }
-  if (a.type === "newgame") { S = createGame({ name: a.name || "Gulf Star Trading", difficulty: a.difficulty }); S.paused = true; lastLed = 0; chip = null; ui.page = "dashboard"; ui.rfq = null; ui.so = null; ui.modal = null; ui.guide = true; toast("New game started. Follow the training banner!"); render(); return; }
+  if (a.type === "newgame") { S = createGame({ name: a.name || "Gulf Star Trading", difficulty: a.difficulty }); S.paused = true; lastMsg = 0; lastLed = 0; chip = null; ui.page = "dashboard"; ui.rfq = null; ui.so = null; ui.modal = null; ui.guide = true; toast("New game started. Follow the training banner!"); render(); return; }
   const r = dispatch(S, a);
   if (a.ui) applyUi({ type: "ui", ...a.ui });
   if (a.type === "requestQuotes" || a.type === "autoQuotes" || a.type === "negotiateQuote" || a.type === "negotiateTerms") ui.modal = null;
@@ -114,7 +116,7 @@ function coach(): string {
 }
 let rendering = false, again = false;
 function render() {
-  watchCash();
+  watchCash(); watchMsgs();
   if (rendering) { again = true; return; } rendering = true;
   try { draw(); } finally { rendering = false; } if (again) { again = false; render(); }
 }

@@ -27,7 +27,7 @@ const FIRST = ["Ahmed", "Fatima", "Omar", "Layla", "Khalid", "Noor", "Yusuf", "M
 const LAST = ["Al-Thani", "Hassan", "Nair", "Sharma", "Khan", "Haddad", "Ortiz", "Novak", "Chen", "Silva", "Rahman", "Mansour", "Verma", "Petrov", "Costa", "Abbas", "Iyer", "Farouk", "Lindqvist", "Okafor"];
 const AVATARS = ["🧑‍💼", "👩‍💼", "👨‍💼", "🧑‍🔧", "👩‍🔧", "👨‍🔧", "🧑‍💻", "👩‍💻", "👨‍💻", "🧑‍🏭"];
 export const INDS_SPEC = ["oilgas", "power", "aviation", "medical", "marine", "construction", "mining", "rail", "telecom", "food"];
-export const defaultPolicy = () => ({ baseMargin: 14, minMargin: 6, disc: { junior: 3, officer: 5, senior: 10, supervisor: 10, manager: 15 }, mgrDisc: 10, buyEmp: 2000, buyMgr: 10000, quoteCeo: 60000, urgentCeo: false, creditPerClient: 120000, cashReserve: 15000, freightPref: "balanced", notify: 2, negotiate: true });
+export const defaultPolicy = () => ({ baseMargin: 14, minMargin: 6, disc: { junior: 3, officer: 5, senior: 10, supervisor: 10, manager: 15 }, mgrDisc: 10, buyEmp: 5000, buyMgr: 25000, quoteCeo: 60000, urgentCeo: false, creditPerClient: 120000, cashReserve: 15000, freightPref: "balanced", notify: 2, negotiate: true, budget: { sales: 3000, proc: 150000, logistics: 12000, warehouse: 6000, finance: 4000, quality: 3000 }, payApprove: true, payLimit: 5000, profitTarget: 8000 });
 const emptyKb = () => ({ sup: {}, cat: {}, freight: {}, neg: {}, lessons: [] });
 const clamp = (n, a = 5, b = 98) => Math.max(a, Math.min(b, n));
 export function salaryFor(role, level, sk, mult = 1) { const avg = (sk.speed + sk.acc + sk.rel + sk.neg + sk.tech) / 5; return Math.round((MONTHLY[role] * 0.55 * LEVEL_MULT[level] * (0.8 + avg / 160) * mult) / 50) * 50; }
@@ -49,9 +49,14 @@ export function candidates(s, role) {
     return [0, 1, 2].map((i) => { const e = makeEmp(s, rng, role); return { ...e, key: `${m}-${role}-${i}` }; }).filter((c) => !w.hiredCand.includes(c.key));
 }
 export function wfOf(s) {
-    if (s.wf)
-        return s.wf;
-    const w = { on: true, emps: [], tasks: [], msgs: [], autonomy: { sales: "balanced", proc: "balanced", logistics: "balanced", warehouse: "balanced", finance: "balanced", quality: "balanced" }, policy: defaultPolicy(), kb: emptyKb(), hiredCand: [], cap: {} };
+    if (s.wf) {
+        const w0 = s.wf;
+        w0.policy = { ...defaultPolicy(), ...w0.policy, budget: { ...defaultPolicy().budget, ...(w0.policy.budget ?? {}) } };
+        w0.reports ??= [];
+        w0.spend ??= {};
+        return w0;
+    }
+    const w = { on: true, emps: [], tasks: [], msgs: [], autonomy: { sales: "balanced", proc: "balanced", logistics: "balanced", warehouse: "balanced", finance: "balanced", quality: "balanced" }, policy: defaultPolicy(), kb: emptyKb(), hiredCand: [], cap: {}, reports: [], spend: {} };
     s.wf = w;
     const rng = new Rng(s.seed * 31 + 7);
     for (const [role, n] of Object.entries(s.staff))

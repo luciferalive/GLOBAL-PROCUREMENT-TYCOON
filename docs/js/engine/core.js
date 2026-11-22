@@ -254,6 +254,14 @@ export function stepDay(s) {
         }
     for (const p of s.payables)
         if (!p.paid && p.due <= s.day) {
+            const pw = s.wf;
+            if (pw && pw.on && !s.flags.noTeam && pw.policy.payApprove && p.kind === "supplier" && p.amount >= pw.policy.payLimit * 100 && !p.ok) {
+                if (s.day - p.due === 12) {
+                    s.rep = Math.max(0, s.rep - 0.5);
+                    news(s, `Payment to ${p.to} (${money(p.amount)}) is 12 days overdue: waiting for approval. Reputation suffers.`, "bad");
+                }
+                continue;
+            }
             p.paid = true;
             if (p.kind === "claim")
                 cashIn(s, "claim", `Claim recovered: ${p.ref}`, p.amount);

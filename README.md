@@ -87,6 +87,7 @@ Your employees are real workers, not bonuses. Each has a name, level, skills, pe
 - **Warehouse** receive and inspect goods, then pick, pack and dispatch orders. **Finance** check cash before purchases, send payment reminders and forecast cash. **Quality** check documents.
 - Work goes to the best-suited, least-busy person; managers rebalance overloaded staff; tired people slow down and make mistakes; good people get promoted.
 - Everything above the limits you set (discounts, purchase value, contract size, customer credit) lands in your **Inbox & Approvals**. Autonomy is set per department: low, balanced, high or full.
+- Department budgets, supplier-payment approvals, weekly department reports, inspection reports from Quality, supplier chasing, and technical specialists who suggest equivalent alternatives.
 - Take over any single RFQ yourself, or switch autopilot off to play hands-on.
 
 ## 📸 Tour

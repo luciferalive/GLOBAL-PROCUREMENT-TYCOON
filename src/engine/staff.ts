@@ -30,7 +30,7 @@ const LAST = ["Al-Thani", "Hassan", "Nair", "Sharma", "Khan", "Haddad", "Ortiz",
 const AVATARS = ["🧑‍💼", "👩‍💼", "👨‍💼", "🧑‍🔧", "👩‍🔧", "👨‍🔧", "🧑‍💻", "👩‍💻", "👨‍💻", "🧑‍🏭"];
 export const INDS_SPEC = ["oilgas", "power", "aviation", "medical", "marine", "construction", "mining", "rail", "telecom", "food"];
 
-export const defaultPolicy = (): Policy => ({ baseMargin: 14, minMargin: 6, disc: { junior: 3, officer: 5, senior: 10, supervisor: 10, manager: 15 }, mgrDisc: 10, buyEmp: 2000, buyMgr: 10000, quoteCeo: 60000, urgentCeo: false, creditPerClient: 120000, cashReserve: 15000, freightPref: "balanced", notify: 2, negotiate: true });
+export const defaultPolicy = (): Policy => ({ baseMargin: 14, minMargin: 6, disc: { junior: 3, officer: 5, senior: 10, supervisor: 10, manager: 15 }, mgrDisc: 10, buyEmp: 5000, buyMgr: 25000, quoteCeo: 60000, urgentCeo: false, creditPerClient: 120000, cashReserve: 15000, freightPref: "balanced", notify: 2, negotiate: true, budget: { sales: 3000, proc: 150000, logistics: 12000, warehouse: 6000, finance: 4000, quality: 3000 }, payApprove: true, payLimit: 5000, profitTarget: 8000 });
 const emptyKb = (): KB => ({ sup: {}, cat: {}, freight: {}, neg: {}, lessons: [] });
 const clamp = (n: number, a = 5, b = 98) => Math.max(a, Math.min(b, n));
 
@@ -49,8 +49,8 @@ export function candidates(s: GameState, role: keyof Staff): (Omit<Emp, "id"> & 
   return [0, 1, 2].map((i) => { const e = makeEmp(s, rng, role); return { ...e, key: `${m}-${role}-${i}` }; }).filter((c) => !w.hiredCand.includes(c.key));
 }
 export function wfOf(s: GameState): Workforce {
-  if (s.wf) return s.wf;
-  const w: Workforce = { on: true, emps: [], tasks: [], msgs: [], autonomy: { sales: "balanced", proc: "balanced", logistics: "balanced", warehouse: "balanced", finance: "balanced", quality: "balanced" }, policy: defaultPolicy(), kb: emptyKb(), hiredCand: [], cap: {} };
+  if (s.wf) { const w0 = s.wf; w0.policy = { ...defaultPolicy(), ...w0.policy, budget: { ...defaultPolicy().budget, ...(w0.policy.budget ?? {}) } }; w0.reports ??= []; w0.spend ??= {}; return w0; }
+  const w: Workforce = { on: true, emps: [], tasks: [], msgs: [], autonomy: { sales: "balanced", proc: "balanced", logistics: "balanced", warehouse: "balanced", finance: "balanced", quality: "balanced" }, policy: defaultPolicy(), kb: emptyKb(), hiredCand: [], cap: {}, reports: [], spend: {} };
   s.wf = w; const rng = new Rng(s.seed * 31 + 7);
   for (const [role, n] of Object.entries(s.staff) as [keyof Staff, number][]) for (let i = 0; i < n; i++) w.emps.push({ id: nid(s, "emp"), ...makeEmp(s, rng, role, { level: "officer", trait: i === 0 ? "all" : undefined }) });
   return w;

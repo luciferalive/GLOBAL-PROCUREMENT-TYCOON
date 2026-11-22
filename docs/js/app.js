@@ -12,13 +12,24 @@ import { finance, orders, shipments, warehouse } from "./ui/pages2.js";
 import { banking, network, ledger } from "./ui/pages6.js";
 import { achievements, reports } from "./ui/pages5.js";
 import { customs, competitors, market } from "./ui/pages4.js";
-import { team, tasks, inbox, policies, kbPage, taskModal, inboxBadge } from "./ui/pages7.js";
+import { team, tasks, inbox, policies, kbPage, dreports, taskModal, inboxBadge } from "./ui/pages7.js";
 import { company, customers, documents, industries, logisticsPage, newsPage, settings, suppliers, training } from "./ui/pages3.js";
-const PAGES = [dashboard, rfqs, orders, shipments, customs, market, warehouse, network, suppliers, competitors, customers, logisticsPage, industries, company, team, tasks, inbox, policies, kbPage, finance, ledger, banking, reports, achievements, documents, training, newsPage, settings];
+const PAGES = [dashboard, rfqs, orders, shipments, customs, market, warehouse, network, suppliers, competitors, customers, logisticsPage, industries, company, team, tasks, inbox, policies, kbPage, dreports, finance, ledger, banking, reports, achievements, documents, training, newsPage, settings];
 const GROUPS = ["Operations", "Team", "Network", "Company", "Help"];
 let S = createGame();
 S.paused = true;
 let autoPause = true, lastLed = 0, chip = null;
+let lastMsg = 0;
+function watchMsgs() { const w = S.wf; if (!w || !w.msgs.length)
+    return; const top = w.msgs[0].id; if (!lastMsg) {
+    lastMsg = top;
+    return;
+} for (const m of w.msgs) {
+    if (m.id <= lastMsg)
+        break;
+    if (m.to === "CEO" && m.imp === 3)
+        toast("✋ " + m.text, true);
+} lastMsg = top; }
 function watchCash() {
     const fresh = S.ledger.filter((l) => (l.id ?? 0) > lastLed);
     if (S.ledger[0]?.id)
@@ -105,7 +116,7 @@ function applyUi(a) {
         putSave(a.save).then((ok) => { toast(ok ? `Saved to slot ${a.save}.` : "Could not save (browser storage blocked).", !ok); render(); slotList(); });
     if (a.load)
         getSave(a.load).then((v) => { if (!v)
-            return toast("That slot is empty.", true); S = v.state; S.paused = true; lastLed = S.ledger[0]?.id ?? 0; chip = null; ui.rfq = null; ui.so = null; ui.modal = null; toast(`Loaded ${a.load === "auto" ? "autosave" : "slot " + a.load}.`); render(); });
+            return toast("That slot is empty.", true); S = v.state; S.paused = true; lastMsg = 0; lastLed = S.ledger[0]?.id ?? 0; chip = null; ui.rfq = null; ui.so = null; ui.modal = null; toast(`Loaded ${a.load === "auto" ? "autosave" : "slot " + a.load}.`); render(); });
 }
 function run(a) {
     if (a.type === "ui") {
@@ -116,6 +127,7 @@ function run(a) {
     if (a.type === "newgame") {
         S = createGame({ name: a.name || "Gulf Star Trading", difficulty: a.difficulty });
         S.paused = true;
+        lastMsg = 0;
         lastLed = 0;
         chip = null;
         ui.page = "dashboard";
@@ -239,6 +251,7 @@ function coach() {
 let rendering = false, again = false;
 function render() {
     watchCash();
+    watchMsgs();
     if (rendering) {
         again = true;
         return;

@@ -184,3 +184,23 @@ test("team: promotion raises level and salary; one manager per department; payro
   for (let i = 0; i < 3; i++) dispatch(s, { type: "promote", id: e.id }); assert.equal(e.level, "manager"); assert.ok(managerOf(s, "proc"));
   const cash = s.cash; for (let i = 0; i < 31; i++) stepDay(s); assert.ok(s.cash < cash);
 });
+
+test("team: weekly department reports are filed with real numbers", () => {
+  const s = createGame({ seed: 4 }); for (let i = 0; i < 16; i++) { stepDay(s); approveAll(s); }
+  const reps = wfOf(s).reports; assert.ok(reps.length >= 3, "reports filed: " + reps.length); assert.ok(reps.every((r) => r.kpis.length >= 2));
+  assert.ok(reps.some((r) => r.dept === "finance" || r.dept === "sales"));
+});
+test("team: a zero budget sends spending to the CEO", () => {
+  const s = createGame({ seed: 4 }); dispatch(s, { type: "setPolicy", key: "budget.proc", value: 0 }); dispatch(s, { type: "setPolicy", key: "budget.logistics", value: 0 });
+  let t = null; for (let i = 0; i < 80 && !t; i++) { stepDay(s); t = wfOf(s).tasks.find((x) => x.status === "approval" && x.apr.why.includes("budget")); }
+  assert.ok(t, "an over-budget request reached the CEO");
+});
+test("team: large supplier payments wait for approval, small ones do not; unpaid ones cost reputation", () => {
+  const s = createGame({ seed: 4 }); wfOf(s); s.payables.push({ id: 900, to: "Test Supplier", kind: "supplier", ref: "PO-X", amount: 800000, due: 3, paid: false, po: 0 }, { id: 901, to: "Small Supplier", kind: "supplier", ref: "PO-Y", amount: 20000, due: 3, paid: false, po: 0 });
+  for (let i = 0; i < 4; i++) stepDay(s); assert.equal(s.payables.find((p) => p.id === 901).paid, true); assert.equal(s.payables.find((p) => p.id === 900).paid, false);
+  for (let i = 0; i < 4; i++) { stepDay(s); approveAll(s); } assert.equal(s.payables.find((p) => p.id === 900).paid, true);
+});
+test("team: procurement chases suppliers and a damaged lot produces a Quality report", () => {
+  let chased = false, rep = false; for (const seed of [3, 5, 8, 11]) { const s = createGame({ seed }); const c = candidates(s, "quality")[0]; dispatch(s, { type: "hireCand", role: "quality", key: c.key }); for (let i = 0; i < 150; i++) { stepDay(s); approveAll(s); } const w = wfOf(s); chased ||= w.tasks.some((t) => t.kind === "proc.chase" && t.status === "done"); rep ||= w.reports.some((r) => r.dept === "quality"); if (chased && rep) break; }
+  assert.ok(chased, "supplier chase tasks were done"); assert.ok(rep, "an inspection report was written");
+});

@@ -4,10 +4,10 @@ import { COUNTRY } from "../data/countries.js";
 import { CAT } from "../data/lists.js";
 import { DB } from "../data/db.js";
 import { RULES } from "../data/rules.js";
-import { hooks, isOpen, money, news, nid, R } from "./core.js";
+import { hooks, isOpen, money, news, nid, plOf, R } from "./core.js";
 import { dispatch } from "./actions.js";
 import { FREIGHT_INCLUDED, eligible, freightQuote, landedCost } from "./pricing.js";
-import type { Dept, Emp, GameState, Quote, Rfq, Task } from "./types.js";
+import type { Dept, Emp, GameState, Quote, Rep, Rfq, Task } from "./types.js";
 import { AUT_MULT, DEPTS, DEPT_NAME, LEVELS, LEVEL_PROD, PROMO_EXP, capTasks, empName, lesson, loadOf, managerOf, newTask, openTasks, say, syncStaff, titleOf, wfOf } from "./staff.js";
 
 type Out = "done" | "wait" | "approval" | "fail" | "blocked";
@@ -23,10 +23,14 @@ const fullDocs = (r: Rfq) => !!RULES[DB.clientById[r.client].industry]?.fullDocs
 const log = (t: Task, s: GameState, text: string) => { t.log.push(`Day ${s.day}: ${text}`); if (t.log.length > 14) t.log.shift(); };
 const toCeo = (s: GameState, from: string, text: string, imp: 1 | 2 | 3, ref?: string) => say(s, from, "CEO", text, imp, ref);
 
+/** Small direct spend (fees) inside the department budget. Returns false (and does nothing) when over budget. */
+function canSpend(s: GameState, dept: Dept, amt: number): boolean { const w = wfOf(s), k = `${dept}:${Math.floor(s.day / 30)}`; if ((w.spend[k] ?? 0) + amt > w.policy.budget[dept]) return false; w.spend[k] = (w.spend[k] ?? 0) + amt; return true; }
+const monthProfit = (s: GameState) => { const pl = plOf(s); return pl.rev - pl.cogs - pl.salaries - pl.rent - pl.bank - pl.interest - pl.other; };
 /* ---------------- approvals ---------------- */
 function gate(s: GameState, t: Task, e: Emp, amt: number, key: "buy" | "quote" | "discount", o: { disc?: number; credit?: boolean; urgent?: boolean; label?: string } = {}): boolean {
-  if (t.approved) return false;
   const w = wfOf(s), p = w.policy, aut = w.autonomy[t.dept], m = AUT_MULT[aut], mgr = managerOf(s, t.dept);
+  const bk = `${t.dept}:${Math.floor(s.day / 30)}`; const record = () => { if (key === "buy" && amt > 0 && !t.data?.sp) { (t.data ??= {}).sp = 1; w.spend[bk] = (w.spend[bk] ?? 0) + amt; } };
+  if (t.approved) { record(); return false; }
   let tier: "self" | "manager" | "ceo" = "self", why = "";
   const mgrOk = !!mgr && mgr.id !== e.id && e.level !== "manager";
   const seniorSelf = ["senior", "supervisor", "manager"].includes(e.level);
@@ -34,9 +38,10 @@ function gate(s: GameState, t: Task, e: Emp, amt: number, key: "buy" | "quote" |
   else if (key === "buy") { if (amt > p.buyMgr * m) { tier = "ceo"; why = `Purchase ${money(amt * 100)} is above the manager limit`; } else if (amt > p.buyEmp * m) { tier = mgrOk ? "manager" : seniorSelf ? "self" : "ceo"; why = `Purchase ${money(amt * 100)} is above the employee limit`; } }
   else if (key === "quote") { if (amt > p.quoteCeo * m) { tier = "ceo"; why = `Contract value ${money(amt * 100)} is above the CEO threshold`; } }
   else if (key === "discount") { const lim = p.disc[e.level]; const d = o.disc ?? 0; if (d > lim) { if (d <= p.mgrDisc && mgrOk) { tier = "manager"; why = `Discount ${d.toFixed(1)}% is above ${e.level} authority (${lim}%)`; } else { tier = "ceo"; why = `Discount ${d.toFixed(1)}% is above ${mgrOk || seniorSelf ? "manager" : "staff"} authority`; } } }
+  if (key === "buy" && amt > 0 && p.budget[t.dept] !== undefined && (w.spend[bk] ?? 0) + amt > p.budget[t.dept] * (m >= 3 ? 2 : 1) && tier !== "ceo") { tier = "ceo"; why = `Over the ${DEPT_NAME[t.dept]} budget for this month (${money(((w.spend[bk] ?? 0) + amt) * 100)} of ${money(p.budget[t.dept] * 100)})`; }
   if (o.credit && tier !== "ceo") { tier = "ceo"; why = "Customer credit exposure would exceed the credit limit"; }
   if (o.urgent && p.urgentCeo && aut !== "full" && tier !== "ceo") { tier = "ceo"; why = "Urgent orders need the CEO (policy)"; }
-  if (tier === "self") return false;
+  if (tier === "self") { record(); return false; }
   t.status = "approval"; t.apr = { who: tier, why, amt, asked: s.day }; t.next = tier === "ceo" ? "Waiting for CEO approval" : `Waiting for ${DEPT_NAME[t.dept]} manager approval`; log(t, s, `asked ${tier.toUpperCase()} approval: ${why}`);
   if (tier === "ceo") toCeo(s, who(e), `Approval needed: ${t.title}. ${why}.`, 3, t.rfq ? "rfq:" + t.rfq : undefined);
   else say(s, who(e), DEPT_NAME[t.dept] + " Manager", `Please approve: ${t.title}. ${why}.`, 1);
@@ -93,6 +98,9 @@ function scan(s: GameState) {
   for (const sh of s.ships) { const k = "sh:" + sh.id; if (sh.status !== "delivered" && !ever(s, "log.track", k)) { const t = newTask(s, { kind: "log.track", dept: "logistics", title: `Track ${sh.no} and clear customs`, ref: k, work: 0.3, due: sh.arrive + 2, pri: 1, data: { eta: sh.arrive } }); log(t, s, "shipment booked"); } }
   for (const lot of s.lots) if (lot.status === "inspection") { const k = "lot:" + lot.id; if (!ever(s, "wh.receive", k) && w.emps.some((e) => e.dept === "warehouse" || COVER.warehouse.includes(e.dept))) { newTask(s, { kind: "wh.receive", dept: "warehouse", title: `Receive and inspect ${DB.partsById[lot.partId].pn} ×${lot.qty}`, ref: k, work: 0.3 + lot.qty * 0.004, due: s.day + 2, pri: 2, so: lot.so ?? undefined }); lot.inspectDay = Math.max(lot.inspectDay, s.day + 6); } }
   for (const inv of s.invoices) if (!inv.paid && s.day > inv.due) { const k = `inv:${inv.id}:${Math.floor((s.day - inv.due) / 7)}`; if (!ever(s, "fin.reminder", k)) newTask(s, { kind: "fin.reminder", dept: "finance", title: `Payment reminder: ${inv.no} (${DB.clientById[inv.client].name})`, ref: k, work: 0.2, due: s.day + 2, pri: 1, data: { inv: inv.id } }); }
+  for (const p of s.payables) if (!p.paid && p.kind === "supplier" && w.policy.payApprove && !p.ok && p.amount >= w.policy.payLimit * 100 && p.due - s.day <= 3 && !ever(s, "fin.pay", "pay:" + p.id)) newTask(s, { kind: "fin.pay", dept: "finance", title: `Approve supplier payment: ${p.to} ${money(p.amount)} (${p.ref})`, ref: "pay:" + p.id, work: 0.2, due: p.due, pri: 3, data: { pay: p.id } });
+  for (const po of s.pos) if (po.status === "placed" && s.day >= po.day + Math.ceil((po.readyDay - po.day) * 0.6) && po.readyDay > s.day + 1 && !ever(s, "proc.chase", "po:" + po.id)) newTask(s, { kind: "proc.chase", dept: "proc", title: `Chase ${DB.supplierById[po.supplier]?.name} on ${po.no}`, ref: "po:" + po.id, so: po.so, work: 0.2, due: po.readyDay, pri: 1, data: { po: po.id } });
+  const rk = Math.floor(s.day / 7); if (s.day >= 7) for (const d of DEPTS) if (w.emps.some((e) => e.dept === d) && !ever(s, "rep.weekly", `rep:${d}:${rk}`)) newTask(s, { kind: "rep.weekly", dept: d, title: `Weekly ${DEPT_NAME[d]} report`, ref: `rep:${d}:${rk}`, work: 0.3, due: s.day + 3, pri: 1 });
   const wk = "week:" + Math.floor(s.day / 7); if (s.day >= 3 && !ever(s, "fin.forecast", wk)) newTask(s, { kind: "fin.forecast", dept: "finance", title: "Weekly cash-flow forecast", ref: wk, work: 0.4, due: s.day + 3, pri: 1 });
   const pk = "p:" + Math.floor(s.day / 6); if (s.day >= 2 && !ever(s, "sales.prospect", pk)) newTask(s, { kind: "sales.prospect", dept: "sales", title: "Find and register with new customers", ref: pk, work: 0.5, due: s.day + 5, pri: 1 });
 }
@@ -251,9 +259,9 @@ const HANDLERS: Record<string, (s: GameState, t: Task, e: Emp, slip: boolean) =>
   "sales.followup"(s, t, e) { const r = rfqOf(s, t.rfq); if (!r?.cq) return "done"; const c = DB.clientById[r.client]; s.rel[c.id] = Math.min(100, (s.rel[c.id] ?? 20) + 0.5); if (r.cq.status === "sent" && r.cq.replyDay > s.day + 1 && e.sk.rel >= 55) r.cq.replyDay--; say(s, who(e), "Customer", `Follow-up sent to ${c.name} on ${r.no}.`, 1, "rfq:" + r.id); t.next = "Follow-up sent"; return "done"; },
   "sales.prospect"(s, t, e) {
     const reg = Object.entries(s.reg).find(([, g]) => g.stage === 2 && !g.result);
-    if (reg && s.cash >= 30000 + wfOf(s).policy.cashReserve * 100) { const res = dispatch(s, { type: "submitDocs", id: reg[0] }); if (res.ok) { say(s, who(e), "CEO", `Registration documents submitted to ${DB.clientById[reg[0]].name} ($300 fee).`, 1); t.next = "Submitted vendor documents"; return "done"; } }
+    if (reg && s.cash >= 30000 + wfOf(s).policy.cashReserve * 100 && canSpend(s, "sales", 300)) { const res = dispatch(s, { type: "submitDocs", id: reg[0] }); if (res.ok) { say(s, who(e), "CEO", `Registration documents submitted to ${DB.clientById[reg[0]].name} ($300 fee).`, 1); t.next = "Submitted vendor documents"; return "done"; } }
     const cand = DB.clients.filter((c) => !s.reg[c.id] && s.industries.includes(c.industry)).sort((a, b) => b.volume * (1 - (a.starter ? 0 : 0)) - a.volume).filter((c) => (c.starter || c.volume < 8e6 + e.sk.neg * 1e5 + (LEVELS.indexOf(e.level) * 2e6)))[0];
-    if (!cand) { t.next = "No new targets"; return "done"; } const res = dispatch(s, { type: "contactClient", id: cand.id }); if (res.ok) { say(s, who(e), "CEO", `Contacted ${cand.name}. Waiting for their buyer's reply.`, 1); t.next = `Contacted ${cand.name}`; } return "done";
+    if (!cand) { const best = DB.clients.filter((c) => s.reg[c.id]?.result === "approved").sort((a, b) => (s.rel[b.id] ?? 20) - (s.rel[a.id] ?? 20))[0]; if (best) { s.rel[best.id] = Math.min(100, (s.rel[best.id] ?? 20) + 1); t.next = `Nurtured ${best.name}`; say(s, who(e), "CEO", `Visited ${best.name} to strengthen the relationship.`, 1); } else t.next = "No new targets"; return "done"; } const res = dispatch(s, { type: "contactClient", id: cand.id }); if (res.ok) { say(s, who(e), "CEO", `Contacted ${cand.name}. Waiting for their buyer's reply.`, 1); t.next = `Contacted ${cand.name}`; } return "done";
   },
   "fin.check"(s, t, e) {
     const so = s.sos.find((x) => x.id === t.so); const r = so ? rfqOf(s, so.rfq) : undefined; if (!so || !r) return "fail"; const pol = wfOf(s).policy;
@@ -273,17 +281,18 @@ const HANDLERS: Record<string, (s: GameState, t: Task, e: Emp, slip: boolean) =>
     const sh = s.ships.find((x) => x.id === +String(t.ref).slice(3)); if (!sh) return "done"; const d = (t.data ??= {});
     if (sh.status === "delivered" || ["received", "inspected"].includes(s.pos.find((p) => p.id === sh.po)?.status ?? "")) { t.next = "Arrived. Handed to Warehouse"; return "done"; }
     const po = s.pos.find((p) => p.id === sh.po), so = po ? s.sos.find((x) => x.id === po.so) : undefined;
-    if ((sh.status === "held") && !sh.docsOk) { const res = dispatch(s, { type: "fixCustomsDocs", ship: sh.id }); if (res.ok) { say(s, who(e), DEPT_NAME.proc, `${sh.no} was held for paperwork. Corrected documents filed ($120).`, 1); lesson(s, `${DB.supplierById[po!.supplier]?.name ?? "Supplier"} shipped ${sh.no} with weak documents: customs hold.`); } }
-    if ((sh.status === "held" || sh.status === "customs") && so && s.day + (sh.heldUntil - s.day) > so.needBy - 4 && sh.heldUntil > s.day + 1 && !d.expedited) { const res = dispatch(s, { type: "expediteCustoms", ship: sh.id }); if (res.ok) { d.expedited = 1; toCeo(s, who(e), `${sh.no} would make ${so.no} late. Paid priority customs processing.`, 2); } }
+    if ((sh.status === "held") && !sh.docsOk && canSpend(s, "logistics", 120)) { const res = dispatch(s, { type: "fixCustomsDocs", ship: sh.id }); if (res.ok) { say(s, who(e), DEPT_NAME.proc, `${sh.no} was held for paperwork. Corrected documents filed ($120).`, 1); lesson(s, `${DB.supplierById[po!.supplier]?.name ?? "Supplier"} shipped ${sh.no} with weak documents: customs hold.`); } }
+    if ((sh.status === "held" || sh.status === "customs") && so && s.day + (sh.heldUntil - s.day) > so.needBy - 4 && sh.heldUntil > s.day + 1 && !d.expedited && canSpend(s, "logistics", 450)) { const res = dispatch(s, { type: "expediteCustoms", ship: sh.id }); if (res.ok) { d.expedited = 1; toCeo(s, who(e), `${sh.no} would make ${so.no} late. Paid priority customs processing.`, 2); } }
     if (sh.arrive > (d.eta ?? sh.arrive) && !d.delayNote) { d.delayNote = 1; if (so) say(s, who(e), DEPT_NAME.sales, `${sh.no} for ${so.no} is delayed: new arrival day ${sh.arrive} (promised delivery by day ${so.needBy}).`, 1, "so:" + so.id); if (so && sh.arrive + 2 > so.needBy) toCeo(s, who(e), `${so.no} is at risk of being late: shipment ${sh.no} now arrives on day ${sh.arrive}.`, 2, "so:" + so.id); }
     if (sh.arrive - s.day <= 1 && sh.status === "in_transit" && !d.notified) { d.notified = 1; say(s, who(e), DEPT_NAME.warehouse, `Shipment ${sh.no} is expected to arrive tomorrow. Please prepare receiving capacity.`, 1); }
     t.wake = s.day + 2; t.next = `${sh.status.replace("_", " ")}, ETA day ${sh.arrive}`; d.eta = Math.max(d.eta ?? 0, sh.arrive); return "wait";
   },
   "wh.receive"(s, t, e, slip) {
     const lot = s.lots.find((l) => l.id === String(t.ref).slice(4)); if (!lot || lot.status !== "inspection") return "done";
+    { const n = parseInt(lot.id.replace(/\D/g, ""), 10) || 0; lot.loc = `${"ABCDEF"[n % 6]}-${String((n * 7) % 40 + 1).padStart(2, "0")}-${(n % 4) + 1}`; log(t, s, `stored at ${lot.loc}`); }
     dispatch(s, { type: "inspect", id: lot.id }); const after = s.lots.find((l) => l.id === lot.id); const po = s.pos.find((p) => p.id === lot.po); const sup = po ? DB.supplierById[po.supplier] : null; const kb = wfOf(s).kb;
     if (po && po.delayed > 2 && sup && !wfOf(s).cap["late" + po.id]) { wfOf(s).cap["late" + po.id] = 1; (kb.sup[sup.id] ??= { asked: 0, replied: 0, won: 0, late: 0, bad: 0 }).late++; lesson(s, `${sup.name} delivered ${po.no} ${po.delayed} days late.`); }
-    if (!after || after.damaged > 0 || lot.damaged > 0) { if (sup) (kb.sup[sup.id] ??= { asked: 0, replied: 0, won: 0, late: 0, bad: 0 }).bad++; const so = lot.so ? s.sos.find((x) => x.id === lot.so) : null; toCeo(s, who(e), `Inspection of ${DB.partsById[lot.partId].pn}: ${lot.damaged} unit(s) damaged or non-conforming${so ? ` (affects ${so.no})` : ""}.`, 2); say(s, who(e), DEPT_NAME.quality, `Please review the inspection report for lot ${lot.id}: ${lot.damaged} unit(s) damaged. Claim and replacement may be needed.`, 1); if (sup) lesson(s, `${sup.name}: damaged or wrong goods on ${po?.no}.`); t.next = `${lot.damaged} damaged unit(s) recorded`; }
+    if (!after || after.damaged > 0 || lot.damaged > 0) { if (sup) (kb.sup[sup.id] ??= { asked: 0, replied: 0, won: 0, late: 0, bad: 0 }).bad++; const so = lot.so ? s.sos.find((x) => x.id === lot.so) : null; toCeo(s, who(e), `Inspection of ${DB.partsById[lot.partId].pn}: ${lot.damaged} unit(s) damaged or non-conforming${so ? ` (affects ${so.no})` : ""}.`, 2); say(s, who(e), DEPT_NAME.quality, `Please review the inspection report for lot ${lot.id}: ${lot.damaged} unit(s) damaged. Claim and replacement may be needed.`, 1); if (sup) lesson(s, `${sup.name}: damaged or wrong goods on ${po?.no}.`); if (wfOf(s).emps.some((x) => x.dept === "quality")) newTask(s, { kind: "qa.report", dept: "quality", title: `Inspection report for lot ${lot.id}`, ref: "lotrep:" + lot.id, so: lot.so ?? undefined, work: 0.4, due: s.day + 3, pri: 2, data: { lot: lot.id, dmg: lot.damaged, pn: DB.partsById[lot.partId].pn, sup: sup?.name ?? "", po: po?.no ?? "", wrong: !!po?.wrongItem } }); t.next = `${lot.damaged} damaged unit(s) recorded`; }
     else { t.next = "Inspection passed. Stock recorded"; const so = lot.so ? s.sos.find((x) => x.id === lot.so) : null; say(s, who(e), DEPT_NAME.sales, `Items for ${so?.no ?? "stock"} have been inspected and are ready for dispatch.`, 1, so ? "so:" + so.id : undefined); }
     return "done";
   },
@@ -293,6 +302,38 @@ const HANDLERS: Record<string, (s: GameState, t: Task, e: Emp, slip: boolean) =>
     const cost = Math.round(part.list * 1.12 * 100) * miss; if (gate(s, t, e, usd(cost), "buy", { urgent: true })) return "approval";
     const res = dispatch(s, { type: "topUp", so: so.id, line: i }); if (!res.ok) { t.data!.tries = (t.data!.tries ?? 0) + 1; t.wake = s.day + 2; t.next = res.msg ?? "failed"; if (t.data!.tries === 1) toCeo(s, who(e), `${so.no}: ${miss} × ${part.pn} short after damage. ${res.msg}`, 2, "so:" + so.id); return t.data!.tries > 5 ? "fail" : "wait"; }
     t.next = `Bought ${miss} locally (premium price)`; toCeo(s, who(e), `${so.no}: ${miss} × ${part.pn} were damaged or missing. Bought replacements locally for ${money(cost)} so the order can ship.`, 2, "so:" + so.id); lesson(s, `Shortage on ${so.no}: covered ${miss} × ${part.pn} with a local emergency purchase.`); return "done";
+  },
+  "qa.report"(s, t, e) {
+    const d = t.data!; const w = wfOf(s); const id = nid(s, "rep"); const rep: Rep = { id, day: s.day, dept: "quality", author: who(e), title: `Inspection report: lot ${d.lot}`, kpis: [{ k: "Damaged units", v: String(d.dmg), bad: true }, { k: "Part", v: d.pn }, { k: "Supplier", v: d.sup || "n/a" }], lines: [d.wrong ? "Goods do not match the order: non-conforming, rejected." : "Damage found during receiving inspection.", "Photos and serial numbers recorded. Replacement requested from Procurement; insurance claim filed where the shipment was insured."] };
+    w.reports.unshift(rep); if (w.reports.length > 120) w.reports.length = 120; say(s, who(e), DEPT_NAME.proc, `Inspection report ${d.lot}: ${d.dmg} × ${d.pn} from ${d.sup} rejected. Please arrange a replacement.`, 1); t.next = "Report filed, replacement requested"; return "done";
+  },
+  "proc.chase"(s, t, e) {
+    const po = s.pos.find((x) => x.id === t.data!.po); if (!po || po.status !== "placed" || po.readyDay <= s.day + 1) return "done"; const sup = DB.supplierById[po.supplier], sh = s.ships.find((x) => x.id === po.ship); const rng = R(s);
+    const p = 0.12 + e.sk.rel / 300 + e.sk.neg / 400 + (s.rel[sup.id] ?? 20) / 500;
+    if (rng.chance(p)) { const gain = Math.min(3, po.readyDay - s.day - 1); po.readyDay -= gain; if (sh) { sh.depart -= gain; sh.arrive -= gain; } t.next = `${sup.name} pulled the ready date forward ${gain} day(s)`; say(s, who(e), DEPT_NAME.logistics, `${sup.name} will have ${po.no} ready ${gain} day(s) earlier (day ${po.readyDay}).`, 1); }
+    else { t.next = `${sup.name} confirmed the original date`; if (po.delayed > 0) { const so = s.sos.find((x) => x.id === po.so); say(s, who(e), DEPT_NAME.sales, `${sup.name} is ${po.delayed} days behind on ${po.no}${so ? ` (for ${so.no})` : ""}. Chased; no improvement.`, 1); } }
+    return "done";
+  },
+  "fin.pay"(s, t, e) {
+    const p = s.payables.find((x) => x.id === t.data!.pay); if (!p || p.paid || p.ok) return "done";
+    if (s.cash < p.amount) { t.wake = s.day + 1; t.next = `Cash ${money(s.cash)} is below the ${money(p.amount)} payment`; if (!t.data!.warned) { t.data!.warned = 1; toCeo(s, who(e), `We cannot pay ${p.to} ${money(p.amount)} on day ${p.due}: cash is ${money(s.cash)}. Take a loan or expect an overdue payment.`, 3); } return "wait"; }
+    if (gate(s, t, e, usd(p.amount), "buy")) return "approval";
+    p.ok = true; t.next = "Payment approved. Releases on the due date"; say(s, who(e), "CEO", `Supplier payment ${p.to} ${money(p.amount)} approved for day ${p.due}.`, 1); return "done";
+  },
+  "rep.weekly"(s, t, e) {
+    const w = wfOf(s), d = t.dept, wkAgo = s.day - 7; const dn = (kind: string) => w.tasks.filter((x) => x.kind === kind && x.status === "done" && (x.doneDay ?? 0) > wkAgo).length;
+    const mgr = managerOf(s, d); const author = mgr ?? w.emps.filter((x) => x.dept === d).sort((a, b) => LEVELS.indexOf(b.level) - LEVELS.indexOf(a.level))[0] ?? e;
+    const kp: Rep["kpis"] = [], ln: string[] = []; const over = w.tasks.filter((x) => x.dept === d && (x.status === "pending" || x.status === "active") && x.due < s.day).length;
+    if (d === "sales") { const nr = s.rfqs.filter((r) => r.day > wkAgo).length, won = s.sos.filter((o) => o.day > wkAgo).length; const pipe = s.rfqs.filter((r) => r.cq && ["sent", "replied"].includes(r.cq.status)).reduce((a, r) => a + r.cq!.total, 0); kp.push({ k: "New RFQs", v: String(nr) }, { k: "Quotations sent", v: String(dn("sales.quote")) }, { k: "Orders won", v: String(won) }, { k: "Quotes waiting for customers", v: money(pipe) }); ln.push(`${s.rfqs.filter((r) => isOpen(r) && !r.cq).length} RFQs are open without a quotation. ${s.rfqs.filter((r) => r.wf?.stage?.startsWith("queued")).length} are waiting for procurement capacity.`); }
+    else if (d === "proc") { const asked = s.quotes.filter((q) => q.askedDay > wkAgo).length, rep = s.quotes.filter((q) => q.askedDay > wkAgo && q.status === "received").length; kp.push({ k: "Quotes requested", v: String(asked) }, { k: "Replied", v: asked ? Math.round((rep / asked) * 100) + "%" : "-" }, { k: "Orders placed", v: String(dn("proc.po")) }, { k: "Shortages covered", v: String(dn("proc.shortage")) }); const top = Object.entries(w.kb.sup).sort((a, b) => b[1].won - a[1].won)[0]; if (top) ln.push(`Most chosen supplier so far: ${DB.supplierById[top[0]]?.name} (${top[1].won} lines).`); }
+    else if (d === "logistics") { const act = s.ships.filter((x) => x.status !== "delivered"), held = act.filter((x) => x.status === "held" || x.status === "customs").length; const fr = s.ledger.filter((l) => l.day > wkAgo && l.kind === "freight").reduce((a, l) => a + Math.abs(l.amount), 0); kp.push({ k: "Active shipments", v: String(act.length) }, { k: "At customs", v: String(held), bad: held > 2 }, { k: "Freight booked", v: String(dn("log.freight")) }, { k: "Freight paid", v: money(fr) }); }
+    else if (d === "warehouse") { const used = s.lots.reduce((a, l) => a + l.qty * (DB.partsById[l.partId]?.vol ?? 0), 0); kp.push({ k: "Lots received", v: String(dn("wh.receive")) }, { k: "Orders dispatched", v: String(dn("wh.dispatch")) }, { k: "Stock value", v: money(s.lots.reduce((a, l) => a + l.qty * l.unitCost, 0)) }, { k: "Stock units", v: String(s.lots.reduce((a, l) => a + l.qty, 0)) }); ln.push(`Capacity in use: ${used.toFixed(0)} m³.`); }
+    else if (d === "finance") { const ar = s.invoices.filter((i) => !i.paid), od = ar.filter((i) => s.day > i.due); const mp = monthProfit(s); kp.push({ k: "Cash", v: money(s.cash), bad: s.cash < w.policy.cashReserve * 100 }, { k: "Receivables", v: money(ar.reduce((a, i) => a + i.amount, 0)) }, { k: "Overdue invoices", v: String(od.length), bad: od.length > 0 }, { k: "Month profit so far", v: money(mp * 100 / 100), bad: mp < 0 }); ln.push(`Profit target this month: ${money(w.policy.profitTarget * 100)}. ${mp >= w.policy.profitTarget * 100 ? "On track." : "Behind target."}`); }
+    else { kp.push({ k: "Document checks", v: String(dn("qa.review")) }, { k: "Inspection reports", v: String(dn("qa.report")) }, { k: "Lots inspected", v: String(dn("wh.receive")) }); }
+    kp.push({ k: "Overdue tasks", v: String(over), bad: over > 0 }); const staff = w.emps.filter((x) => x.dept === d); const load = staff.reduce((a, x) => a + loadOf(s, x), 0), cap = staff.reduce((a, x) => a + capTasks(x), 0); ln.push(`Team of ${staff.length}, workload ${load.toFixed(0)} of ${cap.toFixed(0)}. Average stress ${Math.round(staff.reduce((a, x) => a + x.stress, 0) / Math.max(1, staff.length))}.`);
+    const bud = w.policy.budget[d], used = w.spend[`${d}:${Math.floor(s.day / 30)}`] ?? 0; ln.push(`Budget used this month: ${money(used * 100)} of ${money(bud * 100)}.`);
+    const rep: Rep = { id: nid(s, "rep"), day: s.day, dept: d, author: who(author), title: `${DEPT_NAME[d]} weekly report, day ${s.day}`, kpis: kp, lines: ln }; w.reports.unshift(rep); if (w.reports.length > 120) w.reports.length = 120;
+    toCeo(s, who(author), `Weekly ${DEPT_NAME[d]} report is ready (${kp.slice(0, 2).map((k) => `${k.k}: ${k.v}`).join(", ")}).`, 1); t.next = "Report filed"; return "done";
   },
   "wh.dispatch"(s, t, e) {
     const so = s.sos.find((x) => x.id === t.so); if (!so || so.status !== "open") return "done"; const res = dispatch(s, { type: "deliver", id: so.id });
@@ -307,7 +348,7 @@ const HANDLERS: Record<string, (s: GameState, t: Task, e: Emp, slip: boolean) =>
   "fin.forecast"(s, t, e) {
     const in14 = s.invoices.filter((i) => !i.paid && i.payDay <= s.day + 14).reduce((a, i) => a + i.amount, 0), out14 = s.payables.filter((p) => !p.paid && p.kind !== "claim" && p.due <= s.day + 14).reduce((a, p) => a + p.amount, 0) + s.sos.filter((o) => o.status === "open" && !o.purchased).length * 0;
     const over = s.invoices.filter((i) => !i.paid && s.day > i.due).length, proj = s.cash + in14 - out14, reserve = wfOf(s).policy.cashReserve * 100;
-    t.next = `Next 14 days: +${money(in14)} in, -${money(out14)} out`;
+    t.next = `Next 14 days: +${money(in14)} in, -${money(out14)} out`; const mp = monthProfit(s), tg = wfOf(s).policy.profitTarget * 100; if (s.day % 30 >= 20 && mp < tg * 0.5) toCeo(s, who(e), `Profit this month is ${money(mp)} against your ${money(tg)} target with ${30 - (s.day % 30)} days left.`, 2);
     if (proj < reserve) toCeo(s, who(e), `Cash-flow warning: projected cash in 14 days is ${money(proj)}, below the ${money(reserve)} reserve. Consider a loan or slowing purchases.`, 3);
     else toCeo(s, who(e), `Weekly forecast: ${money(s.cash)} now, ${money(proj)} projected in 14 days.${over ? ` ${over} invoice(s) overdue.` : ""}`, over ? 2 : 1); return "done";
   },
@@ -329,6 +370,8 @@ function askSuppliers(s: GameState, r: Rfq, li: number, e: Emp, slip: boolean, r
   const cands = eligible(s, part).filter((x) => !already.has(x.sup.id) && (!needAuth(r) || x.sup.auth || x.sup.type === "oem") && (!noAlt(r) || !x.alt)).map((x) => { const k = kb.sup[x.sup.id]; const sc = x.sup.reliab * 30 + (x.sup.auth ? 8 : 0) * (e.sk.tech / 50) + (x.sup.type === "oem" ? 4 : 0) + (1.25 - x.sup.priceF) * 40 * (e.sk.neg / 50) - x.sup.leadD * 0.25 - x.sup.risk * 20 + (kb.cat[part.id]?.includes(x.sup.id) ? 10 : 0) - (k ? k.late * 3 + k.bad * 5 : 0) - Math.min(9, (busy[x.sup.id] ?? 0) * 3) + rnd.next() * (6 + (slip ? 10 : 0)) * (1.3 - e.sk.acc / 100); return { x, sc }; }).sort((a, b) => b.sc - a.sc);
   const n = Math.min(5, (round ? 4 : 3) + (e.sk.neg > 60 ? 1 : 0) + (r.urgent ? 1 : 0)); const pick = cands.slice(0, n).map((c) => c.x.sup.id);
   const cheap = cands.find((c) => !pick.includes(c.x.sup.id) && c.x.sup.priceF <= 0.95 && c.x.sup.type !== "oem"); if (cheap && pick.length >= 3) pick[pick.length - 1] = cheap.x.sup.id;
+  const techE = wfOf(s).emps.find((x) => x.role === "tech" || x.role === "quality" && x.sk.tech >= 65);
+  if (techE && !noAlt(r) && !needAuth(r)) { const alt = cands.find((c) => c.x.alt && !pick.includes(c.x.sup.id)); if (alt && !pick.some((id) => cands.find((c) => c.x.sup.id === id)?.x.alt)) { pick[pick.length - 1] = alt.x.sup.id; say(s, who(techE), DEPT_NAME.proc, `For ${part.pn} on ${r.no}, ${alt.x.sup.name} offers a technically equivalent alternative. Worth a quote.`, 1, "rfq:" + r.id); } }
   if (!pick.length) return 0; const res = dispatch(s, { type: "requestQuotes", rfq: r.id, line: li, suppliers: pick }); if (!res.ok) return 0;
   for (const id of pick) (kb.sup[id] ??= { asked: 0, replied: 0, won: 0, late: 0, bad: 0 }).asked++; return pick.length;
 }
@@ -377,7 +420,7 @@ hooks.day = workforceDay;
 /* ---------------- CEO actions ---------------- */
 import { candidates, makeEmp, salaryFor, ROLE_NAME } from "./staff.js";
 import { Rng } from "./rng.js";
-import { cashOut, plOf } from "./core.js";
+import { cashOut } from "./core.js";
 import type { Action, Result } from "./types.js";
 const ok = (msg?: string): Result => ({ ok: true, msg }), bad = (msg: string): Result => ({ ok: false, msg });
 export function workforceAction(s: GameState, a: Action): Result | null {
@@ -397,7 +440,7 @@ export function workforceAction(s: GameState, a: Action): Result | null {
     }
     case "raise": { const e = w.emps.find((x) => x.id === a.id); if (!e) return bad("No such employee."); e.salary = Math.round((e.salary * 1.08) / 50) * 50; e.morale = Math.min(100, e.morale + 12); return ok(`${e.name} gets an 8% raise. Morale improves.`); }
     case "setAutonomy": { w.autonomy[a.dept as Dept] = a.level; return ok(); }
-    case "setPolicy": { const p = w.policy as any; const v = a.value; if (a.key.startsWith("disc.")) p.disc[a.key.slice(5)] = +v; else p[a.key] = typeof p[a.key] === "boolean" ? !!v : typeof p[a.key] === "number" ? +v : v; return ok(); }
+    case "setPolicy": { const p = w.policy as any; const v = a.value; if (a.key.startsWith("disc.")) p.disc[a.key.slice(5)] = +v; else if (a.key.startsWith("budget.")) p.budget[a.key.slice(7)] = +v; else p[a.key] = typeof p[a.key] === "boolean" ? !!v : typeof p[a.key] === "number" ? +v : v; return ok(); }
     case "autopilot": w.on = !!a.on; return ok(w.on ? "Your team is working again." : "Autopilot off. Nobody picks up new work until you switch it back on.");
     case "rfqManual": { const r = rfqOf(s, a.rfq); if (!r) return bad("No RFQ."); const wf = (r.wf ??= {}); wf.manual = !!a.on; if (!a.on) { wf.stage = undefined; for (const t of w.tasks) if (t.rfq === r.id && (t.status === "pending" || t.status === "waiting")) t.status = "pending"; } for (const t of w.tasks) if (a.on && t.rfq === r.id && !t.so && t.kind !== "log.track" && ["pending", "active", "waiting", "approval", "blocked"].includes(t.status)) { t.status = "failed"; t.next = "Taken over by the CEO"; } return ok(a.on ? "You took over this RFQ. The team will not touch it." : "Handed back to the team."); }
     case "aprDecide": {
