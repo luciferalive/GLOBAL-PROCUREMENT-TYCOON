@@ -236,6 +236,18 @@ function scan(s) {
                 lot.inspectDay = Math.max(lot.inspectDay, s.day + 6);
             }
         }
+    for (const lot of s.lots)
+        if (lot.status === "ok") {
+            if (lot.seen === undefined)
+                lot.seen = lot.qty;
+            else if (lot.qty < lot.seen) {
+                const k = `rc:${lot.id}:${lot.qty}`;
+                if (!ever(s, "wh.recount", k))
+                    newTask(s, { kind: "wh.recount", dept: "warehouse", title: `Recount ${DB.partsById[lot.partId].pn}: stock discrepancy`, ref: k, work: 0.3, due: s.day + 2, pri: 2, data: { lot: lot.id, was: lot.seen, now: lot.qty } });
+            }
+            else
+                lot.seen = lot.qty;
+        }
     for (const inv of s.invoices)
         if (!inv.paid && s.day > inv.due) {
             const k = `inv:${inv.id}:${Math.floor((s.day - inv.due) / 7)}`;
@@ -1036,6 +1048,18 @@ const HANDLERS = {
             w.reports.length = 120;
         toCeo(s, who(author), `Weekly ${DEPT_NAME[d]} report is ready (${kp.slice(0, 2).map((k) => `${k.k}: ${k.v}`).join(", ")}).`, 1);
         t.next = "Report filed";
+        return "done";
+    },
+    "wh.recount"(s, t, e) {
+        const d = t.data, lot = s.lots.find((l) => l.id === d.lot);
+        if (!lot)
+            return "done";
+        lot.seen = lot.qty;
+        const miss = d.was - d.now;
+        lesson(s, `Stock count discrepancy: ${miss} × ${DB.partsById[lot.partId].pn} missing from lot ${lot.id}.`);
+        toCeo(s, who(e), `Recount of lot ${lot.id} confirms ${miss} unit(s) missing. Stock records corrected${lot.so ? "; Procurement will cover the shortage" : ""}.`, 2);
+        say(s, who(e), DEPT_NAME.proc, `Lot ${lot.id} is ${miss} short after recount.`, 1);
+        t.next = "Recounted, records corrected";
         return "done";
     },
     "wh.dispatch"(s, t, e) {

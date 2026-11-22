@@ -204,3 +204,13 @@ test("team: procurement chases suppliers and a damaged lot produces a Quality re
   let chased = false, rep = false; for (const seed of [3, 5, 8, 11]) { const s = createGame({ seed }); const c = candidates(s, "quality")[0]; dispatch(s, { type: "hireCand", role: "quality", key: c.key }); for (let i = 0; i < 150; i++) { stepDay(s); approveAll(s); } const w = wfOf(s); chased ||= w.tasks.some((t) => t.kind === "proc.chase" && t.status === "done"); rep ||= w.reports.some((r) => r.dept === "quality"); if (chased && rep) break; }
   assert.ok(chased, "supplier chase tasks were done"); assert.ok(rep, "an inspection report was written");
 });
+
+test("old saves without a team get one created and keep running", () => {
+  const s = createGame({ seed: 4 }); wfOf(s); const old = JSON.parse(JSON.stringify(s)); delete old.wf; for (let i = 0; i < 20; i++) stepDay(old);
+  assert.ok(wfOf(old).emps.length === 3 && wfOf(old).tasks.length > 0 && old.staff.sales === 1);
+});
+test("stock discrepancy: a missing unit triggers a recount task", () => {
+  const s = createGame({ seed: 4 }); wfOf(s); s.lots.push({ id: "LOT-T", partId: DB.parts[0].id, qty: 5, unitCost: 100, so: null, soLine: -1, day: 0, batch: "x", serial: "x", status: "ok", damaged: 0, po: 0, inspectDay: 0 });
+  stepDay(s); s.lots.find((l) => l.id === "LOT-T").qty = 4; for (let i = 0; i < 4; i++) stepDay(s);
+  assert.ok(wfOf(s).tasks.some((t) => t.kind === "wh.recount" && t.status === "done"));
+});
