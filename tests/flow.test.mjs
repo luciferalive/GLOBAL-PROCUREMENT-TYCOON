@@ -139,3 +139,15 @@ test("industry rules change how hard a customer bargains", () => {
   c.industry = "general"; const a1 = assess(s, rf); c.industry = orig; const a2 = assess(s, rf);
   assert.ok(Math.abs(a2.qe - a1.qe - 0.03) < 1e-9, "construction adds 3 points of price pressure");
 });
+
+test("selectQuote: picks one supplier per line, replaces earlier choice, rejects unavailable quotes", () => {
+  const s = createGame({ seed: 3 }); let r = null;
+  for (let g = 0; g < 80 && !r; g++) { for (const x of s.rfqs) { if (x.status === "new") { dispatch(s, { type: "openRfq", id: x.id }); x.lines.forEach((_, li) => dispatch(s, { type: "autoQuotes", rfq: x.id, line: li, max: 5 })); } if (x.status === "sourcing" && s.quotes.filter((q) => q.rfq === x.id && q.line === 0 && q.status === "received").length >= 2) { r = x; break; } } if (!r) stepDay(s); }
+  assert.ok(r, "found an RFQ with two replies");
+  const qs = s.quotes.filter((q) => q.rfq === r.id && q.line === 0 && q.status === "received");
+  const a = dispatch(s, { type: "selectQuote", rfq: r.id, line: 0, quote: qs[0].id });
+  const b = dispatch(s, { type: "selectQuote", rfq: r.id, line: 0, quote: qs[1].id });
+  assert.ok(a.ok && b.ok);
+  assert.equal(r.lines[0].alloc.length, 1); assert.equal(r.lines[0].alloc[0].quote, qs[1].id);
+  assert.equal(dispatch(s, { type: "selectQuote", rfq: r.id, line: 0, quote: "nope" }).ok, false);
+});

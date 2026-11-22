@@ -250,6 +250,27 @@ export function dispatch(s, a) {
             }
             return ok();
         }
+        case "selectQuote": { // choose ONE supplier for the whole line (replaces any earlier choice)
+            const r = rfqOf(s, a.rfq);
+            if (!r || !inFlow(r))
+                return bad("RFQ is closed.");
+            const l = r.lines[a.line];
+            if (!l)
+                return bad("No line.");
+            const q = s.quotes.find((x) => x.id === a.quote);
+            if (!q || q.status !== "received")
+                return bad("That quote is not available.");
+            if (q.expiry < s.day)
+                return bad("That quote has expired.");
+            const qty = q.inStock ? Math.min(l.qty, q.qtyAvail) : l.qty;
+            if (qty < q.moq)
+                return bad(`Minimum order quantity is ${q.moq}.`);
+            l.alloc = [{ quote: q.id, qty }];
+            const sp = DB.supplierById[q.supplier];
+            if (qty < l.qty)
+                return ok(`${sp.name} can supply only ${qty} of ${l.qty}. Pick a second supplier (or your stock) for the remaining ${l.qty - qty}.`);
+            return ok(`Selected ${sp.name} for line ${a.line + 1}. Now choose shipping below if the delivery terms need it.`);
+        }
         case "clearAlloc": {
             const r = rfqOf(s, a.rfq);
             if (r)
